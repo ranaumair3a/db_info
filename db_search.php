@@ -17,12 +17,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_value'])) {
         $search_value_esc = mysqli_real_escape_string($con, $search_value);
 
         // Get all varchar/text columns from all tables
-        $columnsQuery = "
-            SELECT TABLE_NAME, COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_SCHEMA = '{$db}'
-            AND DATA_TYPE IN ('varchar','text','char','longtext','mediumtext','tinytext')
-            ORDER BY TABLE_NAME, COLUMN_NAME
+         $columnsQuery = "
+            SELECT c.TABLE_NAME, c.COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS c
+            JOIN INFORMATION_SCHEMA.TABLES t 
+              ON c.TABLE_NAME = t.TABLE_NAME 
+             AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
+            WHERE c.TABLE_SCHEMA = '{$db}'
+              AND c.DATA_TYPE IN ('varchar','text','char','longtext','mediumtext','tinytext')
+            ORDER BY t.CREATE_TIME DESC, c.ORDINAL_POSITION
         ";
         $columnsResult = mysqli_query($con, $columnsQuery);
 
