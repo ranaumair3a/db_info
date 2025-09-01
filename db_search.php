@@ -1,267 +1,254 @@
 <?php
 require_once 'config_seci.php';
+date_default_timezone_set('Asia/Karachi');
 
-// Initialize variables
-$resultData = [];
+// Read limit from GET (default: 25)
+$allowedLimits = ['all', '5', '10', '25', '50', '100'];
+$limitParam = isset($_GET['limit']) ? strtolower(trim($_GET['limit'])) : '25';
+if (!in_array($limitParam, $allowedLimits)) $limitParam = '25';
+
+$limitSql = ($limitParam === 'all') ? '' : 'LIMIT ' . intval($limitParam);
+
+// Fetch tables ordered by CREATE_TIME DESC (newest first)
+$query = "
+    SELECT 
+        TABLE_NAME,
+        ENGINE,
+        CREATE_TIME,
+        UPDATE_TIME,
+        TABLE_ROWS,
+        DATA_LENGTH,
+        INDEX_LENGTH,
+        TABLE_COLLATION
+    FROM INFORMATION_SCHEMA.TABLES
+    WHERE TABLE_SCHEMA = '{$db}'
+    ORDER BY CREATE_TIME DESC, TABLE_NAME ASC
+    {$limitSql}
+";
+
+$result = mysqli_query($con, $query);
+$tables = [];
 $error = '';
-$search_value = '';
-$firstOnly = true;
-$total_results = 0;
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['search_value'])) {
-    $search_value = trim($_POST['search_value']);
-    $firstOnly = !isset($_POST['multiple']);
-
-    if (!empty($search_value)) {
-        // Escape search value for mysqli
-        $search_value_esc = mysqli_real_escape_string($con, $search_value);
-
-        // Get all varchar/text columns from all tables
-         $columnsQuery = "
-            SELECT c.TABLE_NAME, c.COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS c
-            JOIN INFORMATION_SCHEMA.TABLES t 
-              ON c.TABLE_NAME = t.TABLE_NAME 
-             AND c.TABLE_SCHEMA = t.TABLE_SCHEMA
-            WHERE c.TABLE_SCHEMA = '{$db}'
-              AND c.DATA_TYPE IN ('varchar','text','char','longtext','mediumtext','tinytext')
-            ORDER BY t.CREATE_TIME DESC, c.ORDINAL_POSITION
-        ";
-        $columnsResult = mysqli_query($con, $columnsQuery);
-
-        if (!$columnsResult) {
-            $error = "Database Error: " . mysqli_error($con);
-        } else {
-            while ($col = mysqli_fetch_assoc($columnsResult)) {
-                $table = $col['TABLE_NAME'];
-                $column = $col['COLUMN_NAME'];
-
-                $query = "SELECT * FROM `$table` WHERE `$column` LIKE '%$search_value_esc%'";
-                if ($firstOnly) {
-                    $query .= " LIMIT 1";
-                }
-
-                $searchResult = mysqli_query($con, $query);
-                if ($searchResult) {
-                    while ($row = mysqli_fetch_assoc($searchResult)) {
-                        $resultData[] = [
-                            'table' => $table,
-                            'column' => $column,
-                            'data' => $row,
-                            'matched_value' => $row[$column]
-                        ];
-                        $total_results++;
-
-                        if ($firstOnly) break 2; // Stop searching after first match
-                    }
-                } else {
-                    $error = "Database Error: " . mysqli_error($con);
-                }
-            }
-        }
-    } else {
-        $error = "Please enter a search value.";
+if ($result) {
+    while ($row = mysqli_fetch_assoc($result)) {
+        $tables[] = $row;
     }
+} else {
+    $error = "Database Error: " . htmlspecialchars(mysqli_error($con));
+}
+
+// Helper for size formatting
+function formatBytes($bytes) {
+    if ($bytes === null) return '—';
+    $bytes = (float)$bytes;
+    $units = ['B','KB','MB','GB','TB'];
+    $i = 0;
+    while ($bytes >= 1024 && $i < count($units)-1) {
+        $bytes /= 1024;
+        $i++;
+    }
+    return number_format($bytes, 2) . ' ' . $units[$i];
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Database Search Tool</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }
-        .glass-effect {
-            backdrop-filter: blur(10px);
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        .table-row:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-        .search-animation {
-            animation: pulse 2s infinite;
-        }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Newest Tables • Database Overview</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+<style>
+  .gradient-bg{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);}
+  .glass{backdrop-filter:blur(10px);background:rgba(255,255,255,.92);border:1px solid rgba(255,255,255,.25)}
+  .table-row:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+  .sticky-th{position:sticky;top:0;z-index:10}
+</style>
 </head>
 <body class="gradient-bg min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-white mb-2">
-                <i class="fas fa-search mr-3"></i>Database Search Tool
-            </h1>
-            <p class="text-blue-100 text-lg">Search across all database tables and columns</p>
-        </div>
-
-        <!-- Search Form -->
-        <div class="max-w-2xl mx-auto mb-8">
-            <form method="POST" class="glass-effect rounded-xl p-6 shadow-xl">
-                <div class="flex flex-col md:flex-row gap-4 mb-4">
-                    <div class="flex-1 relative">
-                        <input type="text" 
-                               name="search_value" 
-                               value="<?= htmlspecialchars($search_value) ?>"
-                               placeholder="Enter value to search..." 
-                               class="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-300"
-                               required>
-                        <i class="fas fa-search absolute left-4 top-4 text-gray-400"></i>
-                    </div>
-                    <button type="submit" 
-                            class="px-8 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 transform hover:scale-105 transition-all duration-300 shadow-lg">
-                        <i class="fas fa-search mr-2"></i>Search
-                    </button>
-                </div>
-                
-                <div class="flex items-center">
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" 
-                               name="multiple" 
-                               <?= isset($_POST['multiple']) ? 'checked' : '' ?>
-                               class="w-5 h-5 text-blue-500 border-gray-300 rounded focus:ring-blue-500">
-                        <span class="ml-3 text-gray-700 font-medium">
-                            <i class="fas fa-list mr-2"></i>Search for multiple matches
-                        </span>
-                    </label>
-                </div>
-            </form>
-        </div>
-
-        <!-- Error Display -->
-        <?php if($error): ?>
-            <div class="max-w-4xl mx-auto mb-6">
-                <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-r-lg shadow-md">
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-triangle mr-3 text-xl"></i>
-                        <strong>Error:</strong>&nbsp;<?= htmlspecialchars($error) ?>
-                    </div>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <!-- Results Section -->
-        <?php if($resultData): ?>
-            <div class="max-w-6xl mx-auto">
-                <!-- Results Header -->
-                <div class="glass-effect rounded-t-xl p-6 border-b">
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-2xl font-bold text-gray-800">
-                            <i class="fas fa-table mr-3 text-blue-600"></i>Search Results
-                        </h2>
-                        <div class="flex items-center space-x-4">
-                            <span class="bg-blue-100 text-blue-800 px-4 py-2 rounded-full font-semibold">
-                                <?= $total_results ?> results found
-                            </span>
-                            <span class="bg-green-100 text-green-800 px-4 py-2 rounded-full font-semibold">
-                                "<?= htmlspecialchars($search_value) ?>"
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Results Table -->
-                <div class="glass-effect rounded-b-xl shadow-xl overflow-hidden">
-                    <div class="max-h-96 overflow-y-auto">
-                        <table class="min-w-full">
-                            <thead class="bg-gradient-to-r from-gray-50 to-gray-100 sticky top-0 z-10">
-                                <tr>
-                                    <th class="py-4 px-6 text-left text-sm font-bold text-gray-700 uppercase tracking-wider border-b">
-                                        <i class="fas fa-database mr-2"></i>Table
-                                    </th>
-                                    <th class="py-4 px-6 text-left text-sm font-bold text-gray-700 uppercase tracking-wider border-b">
-                                        <i class="fas fa-columns mr-2"></i>Column
-                                    </th>
-                                    <th class="py-4 px-6 text-left text-sm font-bold text-gray-700 uppercase tracking-wider border-b">
-                                        <i class="fas fa-eye mr-2"></i>Matched Value
-                                    </th>
-                                    <th class="py-4 px-6 text-left text-sm font-bold text-gray-700 uppercase tracking-wider border-b">
-                                        <i class="fas fa-info-circle mr-2"></i>Full Data
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200">
-                                <?php foreach($resultData as $index => $item): ?>
-                                    <tr class="table-row transition-all duration-300 <?= $index % 2 === 0 ? 'bg-white' : 'bg-gray-50' ?>">
-                                        <td class="py-4 px-6 border-b">
-                                            <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                                                <?= htmlspecialchars($item['table']) ?>
-                                            </span>
-                                        </td>
-                                        <td class="py-4 px-6 border-b">
-                                            <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-medium">
-                                                <?= htmlspecialchars($item['column']) ?>
-                                            </span>
-                                        </td>
-                                        <td class="py-4 px-6 border-b">
-                                            <div class="max-w-xs truncate bg-yellow-50 px-3 py-1 rounded border-l-4 border-yellow-400">
-                                                <?= htmlspecialchars($item['matched_value']) ?>
-                                            </div>
-                                        </td>
-                                        <td class="py-4 px-6 border-b">
-                                            <details class="cursor-pointer">
-                                                <summary class="text-blue-600 hover:text-blue-800 font-medium">
-                                                    <i class="fas fa-chevron-right mr-2"></i>View Details
-                                                </summary>
-                                                <div class="mt-3 p-3 bg-gray-50 rounded border max-h-40 overflow-y-auto">
-                                                    <?php foreach($item['data'] as $k => $v): ?>
-                                                        <div class="mb-2 text-sm">
-                                                            <strong class="text-gray-700"><?= htmlspecialchars($k) ?>:</strong>
-                                                            <span class="text-gray-600"><?= htmlspecialchars($v ?: 'NULL') ?></span>
-                                                        </div>
-                                                    <?php endforeach; ?>
-                                                </div>
-                                            </details>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-        <?php elseif(isset($_POST['search_value']) && !$error): ?>
-            <div class="max-w-4xl mx-auto">
-                <div class="glass-effect rounded-xl p-8 text-center shadow-xl">
-                    <div class="text-6xl text-gray-300 mb-4">
-                        <i class="fas fa-search-minus"></i>
-                    </div>
-                    <h3 class="text-2xl font-bold text-gray-700 mb-2">No Results Found</h3>
-                    <p class="text-gray-600 text-lg">
-                        No matches found for <strong>"<?= htmlspecialchars($search_value) ?>"</strong>
-                    </p>
-                    <p class="text-gray-500 mt-2">Try using different search terms or check your spelling.</p>
-                </div>
-            </div>
-        <?php endif; ?>
-
-        <!-- Footer -->
-        <div class="text-center mt-12 text-blue-100">
-            <p><i class="fas fa-info-circle mr-2"></i>This tool searches across all varchar, text, and char columns in the database.</p>
-        </div>
+  <div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h1 class="text-4xl font-bold text-white mb-2">
+        <i class="fa-solid fa-database mr-3"></i>Newest Tables
+      </h1>
+      <p class="text-blue-100 text-lg">Recently created tables in <span class="font-semibold"><?= htmlspecialchars($db) ?></span> (new → old)</p>
     </div>
 
-    <script>
-        // Add some interactivity
-        document.addEventListener('DOMContentLoaded', function() {
-            const searchInput = document.querySelector('input[name="search_value"]');
-            const submitBtn = document.querySelector('button[type="submit"]');
-            
-            // Add loading animation on form submit
-            document.querySelector('form').addEventListener('submit', function() {
-                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
-                submitBtn.disabled = true;
-            });
+    <!-- Controls -->
+    <div class="max-w-5xl mx-auto mb-6">
+      <div class="glass rounded-xl p-5 shadow-xl">
+        <form method="GET" class="flex flex-col md:flex-row md:items-center gap-4">
+          <div class="flex-1 relative">
+            <input id="filterInput" type="text" placeholder="Filter tables…"
+              class="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-300">
+            <i class="fa-solid fa-magnifying-glass absolute left-4 top-3.5 text-gray-400"></i>
+          </div>
+          <div class="flex items-center gap-3">
+            <label class="text-gray-700 font-medium"><i class="fa-regular fa-square-check mr-2"></i>Limit</label>
+            <select name="limit" class="px-3 py-2 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-blue-500">
+              <?php foreach($allowedLimits as $opt): ?>
+                <option value="<?= $opt ?>" <?= $opt===$limitParam?'selected':'' ?>>
+                  <?= strtoupper($opt)==='ALL'?'All':$opt ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+            <button class="px-5 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-purple-700 transform hover:scale-105 transition-all duration-300 shadow-lg">
+              <i class="fa-solid fa-rotate mr-2"></i>Apply
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-            // Auto-focus on search input
-            searchInput?.focus();
-        });
-    </script>
+    <!-- Error -->
+    <?php if($error): ?>
+      <div class="max-w-5xl mx-auto mb-6">
+        <div class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-r-lg shadow-md">
+          <div class="flex items-center">
+            <i class="fas fa-exclamation-triangle mr-3 text-xl"></i>
+            <strong>Error:</strong>&nbsp;<?= $error ?>
+          </div>
+        </div>
+      </div>
+    <?php endif; ?>
+
+    <!-- Stats -->
+    <div class="max-w-5xl mx-auto mb-4">
+      <div class="glass rounded-xl p-4 flex items-center justify-between text-sm md:text-base">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-semibold">
+            <?= count($tables) ?> table<?= count($tables)==1?'':'s' ?>
+          </span>
+          <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full font-semibold">
+            Limit: <?= strtoupper($limitParam)==='ALL'?'All':intval($limitParam) ?>
+          </span>
+        </div>
+        <div class="text-gray-500">
+          <i class="fa-regular fa-clock mr-2"></i>Generated at <?= date('Y-m-d H:i:s') ?>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div class="max-w-6xl mx-auto glass rounded-xl shadow-xl overflow-hidden">
+      <div class="max-h-[70vh] overflow-y-auto">
+        <table class="min-w-full">
+          <thead class="bg-gradient-to-r from-gray-50 to-gray-100 sticky-th">
+            <tr>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Table</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Created</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Updated</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Rows</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Engine</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Collation</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b">Size</th>
+              <th class="py-4 px-6 text-left text-xs md:text-sm font-bold text-gray-700 uppercase tracking-wider border-b"></th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-gray-200">
+            <?php if(empty($tables)): ?>
+              <tr>
+                <td colspan="8" class="py-8 px-6 text-center text-gray-500">
+                  <i class="fa-regular fa-face-frown mr-2"></i>No tables found.
+                </td>
+              </tr>
+            <?php else: ?>
+              <?php foreach($tables as $i => $t): 
+                $size = (float)($t['DATA_LENGTH'] ?? 0) + (float)($t['INDEX_LENGTH'] ?? 0);
+                $created = $t['CREATE_TIME'] ? date('Y-m-d H:i:s', strtotime($t['CREATE_TIME'])) : '—';
+                $updated = $t['UPDATE_TIME'] ? date('Y-m-d H:i:s', strtotime($t['UPDATE_TIME'])) : '—';
+                $rows    = isset($t['TABLE_ROWS']) ? (int)$t['TABLE_ROWS'] : null;
+              ?>
+              <tr class="table-row transition-all duration-300 <?= $i % 2 === 0 ? 'bg-white' : 'bg-gray-50' ?>">
+                <td class="py-4 px-6 border-b">
+                  <div class="flex items-center gap-2">
+                    <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium"><?= htmlspecialchars($t['TABLE_NAME']) ?></span>
+                  </div>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-emerald-50 text-emerald-700 px-3 py-1 rounded text-sm border border-emerald-200">
+                    <i class="fa-regular fa-calendar-plus mr-1"></i><?= htmlspecialchars($created) ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-amber-50 text-amber-700 px-3 py-1 rounded text-sm border border-amber-200">
+                    <i class="fa-regular fa-pen-to-square mr-1"></i><?= htmlspecialchars($updated) ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded text-sm border border-indigo-200">
+                    <i class="fa-solid fa-list-ol mr-1"></i><?= $rows === null ? '—' : number_format($rows) ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-purple-50 text-purple-700 px-3 py-1 rounded text-sm border border-purple-200">
+                    <?= htmlspecialchars($t['ENGINE'] ?: '—') ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-gray-50 text-gray-700 px-3 py-1 rounded text-sm border border-gray-200">
+                    <?= htmlspecialchars($t['TABLE_COLLATION'] ?: '—') ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b">
+                  <span class="bg-teal-50 text-teal-700 px-3 py-1 rounded text-sm border border-teal-200">
+                    <i class="fa-solid fa-hard-drive mr-1"></i><?= formatBytes($size) ?>
+                  </span>
+                </td>
+                <td class="py-4 px-6 border-b text-right">
+                  <button class="copyBtn px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow"
+                          data-name="<?= htmlspecialchars($t['TABLE_NAME']) ?>">
+                    <i class="fa-regular fa-copy mr-1"></i>Copy
+                  </button>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+            <?php endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="text-center mt-10 text-blue-100">
+      <p><i class="fas fa-info-circle mr-2"></i>Ordered by <strong>CREATE_TIME DESC</strong>. If CREATE_TIME is <em>NULL</em>, alphabetic fallback is applied per query order.</p>
+    </div>
+  </div>
+
+  <script>
+    // Client-side filter
+    const filterInput = document.getElementById('filterInput');
+    const tableBody = document.getElementById('tableBody');
+
+    function normalize(s){ return (s || '').toLowerCase().trim(); }
+
+    filterInput?.addEventListener('input', function(){
+      const q = normalize(this.value);
+      const rows = tableBody.querySelectorAll('tr');
+      rows.forEach(r => {
+        const nameBadge = r.querySelector('td:nth-child(1) span');
+        if(!nameBadge){ r.style.display = ''; return; }
+        const name = normalize(nameBadge.textContent);
+        r.style.display = name.includes(q) ? '' : 'none';
+      });
+    });
+
+    // Copy table name
+    document.querySelectorAll('.copyBtn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.getAttribute('data-name');
+        try {
+          await navigator.clipboard.writeText(name);
+          const prev = btn.innerHTML;
+          btn.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Copied';
+          setTimeout(()=> btn.innerHTML = prev, 1200);
+        } catch (e) {
+          alert('Copy failed: ' + e);
+        }
+      });
+    });
+  </script>
 </body>
 </html>
