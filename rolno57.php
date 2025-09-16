@@ -4,7 +4,7 @@
 
 $path = isset($_GET['path']) ? $_GET['path'] : __DIR__;
 $path = realpath($path);
-$sort = isset($_GET['sort']) ? $_GET['sort'] : 'mtime-desc'; // Default sort by modification time descending
+$sort = isset($_GET['sort']) ? $_GET['sort'] : 'date_desc'; // Default sort: newest first
 
 function h($s) { return htmlspecialchars($s, ENT_QUOTES); }
 function formatBytes($size) {
@@ -56,21 +56,24 @@ if(isset($_GET['del'])) {
     header("Location: ?path=".urlencode($path)."&sort=".urlencode($sort)); exit;
 }
 
-// Handle bulk operations
-if(isset($_POST['bulk_action']) && isset($_POST['selected_items'])) {
+// Handle bulk delete
+if(isset($_POST['bulk_delete']) && !empty($_POST['selected_items'])) {
     foreach($_POST['selected_items'] as $item) {
-        $target = realpath($path.'/'.$item);
-        if($_POST['bulk_action'] === 'delete') {
-            if(is_file($target)) unlink($target);
-            if(is_dir($target)) @rmdir($target);
-        } elseif($_POST['bulk_action'] === 'backup') {
-            if(is_file($target)) {
-                $backup_name = $item . '.bak_' . date('Ymd_His');
-                copy($target, $path.'/'.$backup_name);
-            }
-        }
+        $target = realpath($path.'/'.urldecode($item));
+        if(is_file($target)) unlink($target);
+        if(is_dir($target)) @rmdir($target);
     }
     header("Location: ?path=".urlencode($path)."&sort=".urlencode($sort)); exit;
+}
+
+// Handle backup
+if(isset($_GET['backup'])) {
+    $target = realpath($path.'/'.$_GET['backup']);
+    if(is_file($target)) {
+        $backup_name = basename($target).'.bak_'.date('Ymd_His');
+        copy($target, $path.'/'.$backup_name);
+        header("Location: ?path=".urlencode($path)."&sort=".urlencode($sort)); exit;
+    }
 }
 
 if(isset($_GET['dl'])) {
@@ -82,17 +85,7 @@ if(isset($_GET['dl'])) {
     }
 }
 
-// Handle backup
-if(isset($_GET['backup'])) {
-    $target = realpath($path.'/'.$_GET['backup']);
-    if(is_file($target)) {
-        $backup_name = basename($target) . '.bak_' . date('Ymd_His');
-        copy($target, $path.'/'.$backup_name);
-        header("Location: ?path=".urlencode($path)."&sort=".urlencode($sort)); exit;
-    }
-}
-
-// File editor
+// File editor (unchanged)
 if(isset($_GET['edit'])) {
     $file = realpath($path.'/'.$_GET['edit']);
     if($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -148,7 +141,7 @@ tailwind.config = {
     exit;
 }
 
-// Handle permissions change
+// Handle permissions change (unchanged)
 if(isset($_GET['chmod'])) {
     $file = realpath($path.'/'.$_GET['chmod']);
     if($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -304,7 +297,7 @@ if($_SERVER['REQUEST_METHOD'] === 'POST') {
     header("Location: ?path=".urlencode($path)."&sort=".urlencode($sort)); exit;
 }
 
-// Get files and folders with modification time
+// Get files and folders with modification times
 $items = scandir($path);
 $dirs = $files = [];
 foreach($items as $item) {
@@ -318,24 +311,17 @@ foreach($items as $item) {
     }
 }
 
-// Sort items
-function sortItems($items, $sort) {
-    usort($items, function($a, $b) use ($sort) {
-        if($sort === 'mtime-desc') {
-            return $b['mtime'] <=> $a['mtime'];
-        } elseif($sort === 'mtime-asc') {
-            return $a['mtime'] <=> $b['mtime'];
-        } elseif($sort === 'name-asc') {
-            return strcmp($a['name'], $b['name']);
-        } else { // name-desc
-            return strcmp($b['name'], $a['name']);
-        }
-    });
-    return $items;
+// Sort function
+function sortItems($a, $b, $sortType = 'date_desc') {
+    if($sortType === 'date_asc') {
+        return $a['mtime'] - $b['mtime'];
+    }
+    return $b['mtime'] - $a['mtime']; // date_desc (newest first)
 }
 
-$dirs = sortItems($dirs, $sort);
-$files = sortItems($files, $sort);
+// Apply sorting
+usort($dirs, function($a, $b) use ($sort) { return sortItems($a, $b, $sort); });
+usort($files, function($a, $b) use ($sort) { return sortItems($a, $b, $sort); });
 
 // File icons
 function getIcon($item, $isDir) {
@@ -405,6 +391,12 @@ foreach($parts as $i => $part) {
 
 echo "</div>
 </div>
+<div class='flex items-center space-x-3'>
+<select id='sortSelect' onchange='window.location=\"?path=".urlencode($path)."&sort=\"+this.value' class='px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'>
+    <option value='date_desc' ".($sort === 'date_desc' ? 'selected' : '').">Newest First</option>
+    <option value='date_asc' ".($sort === 'date_asc' ? 'selected' : '').">Oldest First</option>
+</select>
+</div>
 </div>
 </div>
 
@@ -450,37 +442,18 @@ echo "</div>
 </form>
 </div>
 
-<!-- Bulk Actions -->
-<div class='bg-gray-800 rounded-xl p-4 mb-4 border border-gray-700'>
-<form method='POST' id='bulkForm'>
-<div class='flex items-center space-x-3'>
-<select name='bulk_action' class='bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'>
-    <option value=''>Select Action</option>
-    <option value='delete'>Delete Selected</option>
-    <option value='backup'>Backup Selected</option>
-</select>
-<button type='submit' onclick='return confirm("Confirm action on selected items?")' class='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors duration-200'>
-    Apply
-</button>
-</div>
-</form>
-</div>
-
 <!-- Files Table -->
+<form method='POST' id='bulkForm'>
 <div class='bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 overflow-hidden animate-fade-in'>
 <!-- Desktop Header -->
 <div class='hidden lg:grid lg:grid-cols-12 gap-4 bg-gray-700 px-6 py-4 text-sm font-medium text-gray-300 border-b border-gray-600'>
 <div class='col-span-1'>
     <input type='checkbox' id='selectAll' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
 </div>
-<div class='col-span-4'>
-    <a href='?path=".urlencode($path)."&sort=".($sort === 'name-asc' ? 'name-desc' : 'name-asc')."' class='flex items-center'>Name ".($sort === 'name-asc' ? '<i class="fas fa-sort-up ml-1"></i>' : ($sort === 'name-desc' ? '<i class="fas fa-sort-down ml-1"></i>' : ''))."</a>
-</div>
+<div class='col-span-4'>Name</div>
 <div class='col-span-1'>Type</div>
 <div class='col-span-1'>Size</div>
-<div class='col-span-2'>
-    <a href='?path=".urlencode($path)."&sort=".($sort === 'mtime-desc' ? 'mtime-asc' : 'mtime-desc')."' class='flex items-center'>Modified ".($sort === 'mtime-desc' ? '<i class="fas fa-sort-down ml-1"></i>' : ($sort === 'mtime-asc' ? '<i class="fas fa-sort-up ml-1"></i>' : ''))."</a>
-</div>
+<div class='col-span-2'>Modified</div>
 <div class='col-span-1'>Permissions</div>
 <div class='col-span-2'>Actions</div>
 </div>
@@ -496,7 +469,7 @@ foreach($dirs as $item) {
     <!-- Desktop Layout -->
     <div class='hidden lg:grid lg:grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-750 transition-colors duration-200 group'>
     <div class='col-span-1'>
-        <input type='checkbox' name='selected_items[]' value='".h($item['name'])."' form='bulkForm' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
+        <input type='checkbox' name='selected_items[]' value='".urlencode($item['name'])."' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
     </div>
     <div class='col-span-4'>
     <a href='?path=".urlencode($full)."&sort=".urlencode($sort)."' class='flex items-center space-x-3 text-gray-100 hover:text-blue-400 transition-colors duration-200'>
@@ -526,11 +499,11 @@ foreach($dirs as $item) {
     <div class='lg:hidden px-6 py-4 hover:bg-gray-750 transition-colors duration-200'>
     <div class='flex items-center justify-between mb-2'>
     <div class='flex items-center space-x-3'>
-        <input type='checkbox' name='selected_items[]' value='".h($item['name'])."' form='bulkForm' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
-        <a href='?path=".urlencode($full)."&sort=".urlencode($sort)."' class='flex items-center space-x-3 text-gray-100 hover:text-blue-400 transition-colors duration-200'>
-        <i class='".getIcon($item['name'], true)." text-lg'></i>
-        <span class='font-medium'>".h($item['name'])."</span>
-        </a>
+    <input type='checkbox' name='selected_items[]' value='".urlencode($item['name'])."' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
+    <a href='?path=".urlencode($full)."&sort=".urlencode($sort)."' class='flex items-center space-x-3 text-gray-100 hover:text-blue-400 transition-colors duration-200'>
+    <i class='".getIcon($item['name'], true)." text-lg'></i>
+    <span class='font-medium'>".h($item['name'])."</span>
+    </a>
     </div>
     <span class='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-600 text-white'>DIR</span>
     </div>
@@ -539,7 +512,7 @@ foreach($dirs as $item) {
     <span class='font-mono text-xs bg-gray-700 px-2 py-1 rounded'>$perms</span>
     </div>
     <div class='flex items-center space-x-3'>
-    <a href='?path=".urlencode($path)."&chmod=".urlencode($item['name'])."&sort=".urlencode($sort)."' class='flex items-center space-x-1 px-3 py-1.5 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors duration-200'>
+    <a href='?path=".urlencode($path)."&chmod=".urlencode($item['name'])."&sort=".urlencode($sort)."' class='flex items-center space-x-1 px-3 py-1.5 text-xs bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors duration-200'>
     <i class='fas fa-lock'></i>
     <span>Permissions</span>
     </a>
@@ -568,7 +541,7 @@ foreach($files as $item) {
     <!-- Desktop Layout -->
     <div class='hidden lg:grid lg:grid-cols-12 gap-4 px-6 py-4 hover:bg-gray-750 transition-colors duration-200 group'>
     <div class='col-span-1'>
-        <input type='checkbox' name='selected_items[]' value='".h($item['name'])."' form='bulkForm' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
+        <input type='checkbox' name='selected_items[]' value='".urlencode($item['name'])."' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
     </div>
     <div class='col-span-4 flex items-center space-x-3'>
     <i class='".getIcon($item['name'], false)." text-lg'></i>
@@ -605,11 +578,9 @@ foreach($files as $item) {
     <div class='lg:hidden px-6 py-4 hover:bg-gray-750 transition-colors duration-200'>
     <div class='flex items-center justify-between mb-2'>
     <div class='flex items-center space-x-3'>
-        <input type='checkbox' name='selected_items[]' value='".h($item['name'])."' form='bulkForm' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
-        <div class='flex items-center space-x-3'>
-        <i class='".getIcon($item['name'], false)." text-lg'></i>
-        <span class='font-medium text-gray-100'>".h($item['name'])."</span>
-        </div>
+    <input type='checkbox' name='selected_items[]' value='".urlencode($item['name'])."' class='w-4 h-4 text-blue-600 bg-gray-600 border-gray-500 rounded focus:ring-blue-500 focus:ring-2'>
+    <i class='".getIcon($item['name'], false)." text-lg'></i>
+    <span class='font-medium text-gray-100'>".h($item['name'])."</span>
     </div>
     <span class='inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-600 text-gray-200'>$typeLabel</span>
     </div>
@@ -650,7 +621,13 @@ foreach($files as $item) {
 
 echo "
 </div>
+<div class='p-4 bg-gray-700 border-t border-gray-600'>
+    <button type='submit' name='bulk_delete' onclick='return confirm(\"Delete selected items?\")' class='px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-800'>
+        <i class='fas fa-trash mr-2'></i>Delete Selected
+    </button>
 </div>
+</div>
+</form>
 
 <!-- Footer Stats -->
 <div class='mt-8 bg-gray-800 rounded-xl p-4 border border-gray-700'>
@@ -706,6 +683,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const checkboxes = document.querySelectorAll('input[name=\"selected_items[]\"]');
     selectAll.addEventListener('change', function() {
         checkboxes.forEach(cb => cb.checked = this.checked);
+    });
+
+    // Update select all state based on individual checkboxes
+    checkboxes.forEach(cb => {
+        cb.addEventListener('change', function() {
+            selectAll.checked = Array.from(checkboxes).every(cb => cb.checked);
+        });
     });
 });
 </script>
