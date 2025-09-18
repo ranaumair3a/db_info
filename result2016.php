@@ -5,7 +5,7 @@ date_default_timezone_set('Asia/Karachi');
 $error = '';
 $success = '';
 $data = null;
-$table = 'RESULT_IIIA00024_FIINAL';
+$table = 'REESULT_IIIA025_FIINAL';
 
 if (isset($_POST['table'])) {
     $table = mysqli_real_escape_string($con, $_POST['table']);
