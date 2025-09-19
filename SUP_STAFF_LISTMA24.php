@@ -22,6 +22,15 @@
         return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
     }
 
+    function get_grade($per) {
+        if ($per >= 90) return 'A+';
+        else if ($per >= 80) return 'A';
+        else if ($per >= 70) return 'B';
+        else if ($per >= 60) return 'C';
+        else if ($per >= 50) return 'D';
+        else return 'F';
+    }
+
     $rno = 0;
     if (isset($_POST['rno'])) {
         $rno = (int)($_POST['rno']);
@@ -55,72 +64,81 @@
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_roll_no'])) {
-        // Fetch current data for totals and other fixed fields
-        $query = "SELECT * FROM NANA2024000_RESULT WHERE RNO = ?";
-        $stmt = mysqli_stmt_init($con);
-        mysqli_stmt_prepare($stmt, $query);
-        mysqli_stmt_bind_param($stmt, "i", $rno);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
-        $current_data = mysqli_fetch_array($result);
+        $updatedName = escape($_POST['name'] ?? $data['NAME']);
+        $updatedFather = escape($_POST['father'] ?? $data['FATHER']);
+        $updatedInst = escape($_POST['inst_name'] ?? $data['INST_NAME']);
 
-        $updatedFields = [
-            'NAME' => $_POST['name'] ?? $current_data['NAME'],
-            'FATHER' => $_POST['father'] ?? $current_data['FATHER'],
-            'INST_NAME' => $_POST['inst_name'] ?? $current_data['INST_NAME'],
-            'UR' => (int)($_POST['ur'] ?? $current_data['UR']),
-            'ENG' => (int)($_POST['eng'] ?? $current_data['ENG']),
-            'ISL' => (int)($_POST['isl'] ?? $current_data['ISL']),
-            'THQ' => (int)($_POST['thq'] ?? $current_data['THQ']),
-            'PS' => (int)($_POST['ps'] ?? $current_data['PS']),
-            'MATHS' => (int)($_POST['maths'] ?? $current_data['MATHS']),
-            'MARKS6' => (int)($_POST['marks6'] ?? $current_data['MARKS6']),
-            'MARKS7' => (int)($_POST['marks7'] ?? $current_data['MARKS7']),
-            'MARKS8' => (int)($_POST['marks8'] ?? $current_data['MARKS8'])
+        $updatedMarks = [
+            'ur' => (int)($_POST['ur'] ?? $data['UR']),
+            'eng' => (int)($_POST['eng'] ?? $data['ENG']),
+            'isl' => (int)($_POST['isl'] ?? $data['ISL']),
+            'thq' => (int)($_POST['thq'] ?? $data['THQ']),
+            'ps' => (int)($_POST['ps'] ?? $data['PS']),
+            'maths' => (int)($_POST['maths'] ?? $data['MATHS']),
+            'marks6' => (int)($_POST['marks6'] ?? $data['MARKS6']),
+            'marks7' => (int)($_POST['marks7'] ?? $data['MARKS7']),
+            'marks8' => (int)($_POST['marks8'] ?? $data['MARKS8'])
         ];
 
-        // Calculate derived fields
-        $subjects = [
-            ['obt_key' => 'UR', 'total_key' => 'SUB1_TMARKS', 'per_key' => 'SUB1_PER', 'grade_key' => 'SUB1_GRADE', 'pass_key' => 'PASS1'],
-            ['obt_key' => 'ENG', 'total_key' => 'SUB2_TMARKS', 'per_key' => 'SUB2_PER', 'grade_key' => 'SUB2_GRADE', 'pass_key' => 'PASS2'],
-            ['obt_key' => 'ISL', 'total_key' => 'SUB3_TMARKS', 'per_key' => 'SUB3_PER', 'grade_key' => 'SUB3_GRADE', 'pass_key' => 'PASS3'],
-            ['obt_key' => 'THQ', 'total_key' => 'SUB9_TMARKS', 'per_key' => 'SUB9_PER', 'grade_key' => 'SUB9_GRADE', 'pass_key' => 'PASS9'],
-            ['obt_key' => 'PS', 'total_key' => 'SUB4_TMARKS', 'per_key' => 'SUB4_PER', 'grade_key' => 'SUB4_GRADE', 'pass_key' => 'PASS4'],
-            ['obt_key' => 'MATHS', 'total_key' => 'SUB5_TMARKS', 'per_key' => 'SUB5_PER', 'grade_key' => 'SUB5_GRADE', 'pass_key' => 'PASS5'],
-            ['obt_key' => 'MARKS6', 'total_key' => 'SUB6_TMARKS', 'per_key' => 'SUB6_PER', 'grade_key' => 'SUB6_GRADE', 'pass_key' => 'PASS6'],
-            ['obt_key' => 'MARKS7', 'total_key' => 'SUB7_TMARKS', 'per_key' => 'SUB7_PER', 'grade_key' => 'SUB7_GRADE', 'pass_key' => 'PASS7'],
-            ['obt_key' => 'MARKS8', 'total_key' => 'SUB8_TMARKS', 'per_key' => 'SUB8_PER', 'grade_key' => 'SUB8_GRADE', 'pass_key' => 'PASS8']
-        ];
+        // Calculate percentiles, grades, passes
+        $sub1_t = (int)$data['SUB1_TMARKS'];
+        $sub1_obt = $updatedMarks['ur'];
+        $sub1_per = $sub1_t > 0 ? round(($sub1_obt / $sub1_t) * 100, 2) : 0;
+        $sub1_grade = get_grade($sub1_per);
+        $pass1 = ($sub1_obt >= ceil($sub1_t * 0.33)) ? 1 : 0;
 
-        $gazres = 0;
-        $all_pass = true;
-        foreach ($subjects as &$sub) {
-            $obt = $updatedFields[$sub['obt_key']];
-            $total = (int)$current_data[$sub['total_key']];
-            if ($total > 0) {
-                $per = ($obt / $total) * 100;
-                $updatedFields[$sub['per_key']] = number_format($per, 2);
-                if ($per >= 90) $grade = 'A+';
-                elseif ($per >= 80) $grade = 'A';
-                elseif ($per >= 70) $grade = 'B';
-                elseif ($per >= 60) $grade = 'C';
-                elseif ($per >= 50) $grade = 'D';
-                else $grade = 'F';
-                $updatedFields[$sub['grade_key']] = $grade;
-                $pass = ($obt >= $total * 0.33) ? 1 : 0;
-                $updatedFields[$sub['pass_key']] = $pass;
-                $gazres += $obt;
-                if ($pass == 0) $all_pass = false;
-            } else {
-                $updatedFields[$sub['per_key']] = 0;
-                $updatedFields[$sub['grade_key']] = '';
-                $updatedFields[$sub['pass_key']] = '';
-            }
-        }
-        $updatedFields['GAZRES'] = $gazres;
-        $updatedFields['PASS'] = $all_pass ? 1 : 0;
+        $sub2_t = (int)$data['SUB2_TMARKS'];
+        $sub2_obt = $updatedMarks['eng'];
+        $sub2_per = $sub2_t > 0 ? round(($sub2_obt / $sub2_t) * 100, 2) : 0;
+        $sub2_grade = get_grade($sub2_per);
+        $pass2 = ($sub2_obt >= ceil($sub2_t * 0.33)) ? 1 : 0;
 
-        // Update query with all fields
+        $sub3_t = (int)$data['SUB3_TMARKS'];
+        $sub3_obt = $updatedMarks['isl'];
+        $sub3_per = $sub3_t > 0 ? round(($sub3_obt / $sub3_t) * 100, 2) : 0;
+        $sub3_grade = get_grade($sub3_per);
+        $pass3 = ($sub3_obt >= ceil($sub3_t * 0.33)) ? 1 : 0;
+
+        $sub9_t = (int)$data['SUB9_TMARKS'];
+        $sub9_obt = $updatedMarks['thq'];
+        $sub9_per = $sub9_t > 0 ? round(($sub9_obt / $sub9_t) * 100, 2) : 0;
+        $sub9_grade = get_grade($sub9_per);
+        $pass9 = ($sub9_obt >= ceil($sub9_t * 0.33)) ? 1 : 0;
+
+        $sub4_t = (int)$data['SUB4_TMARKS'];
+        $sub4_obt = $updatedMarks['ps'];
+        $sub4_per = $sub4_t > 0 ? round(($sub4_obt / $sub4_t) * 100, 2) : 0;
+        $sub4_grade = get_grade($sub4_per);
+        $pass4 = ($sub4_obt >= ceil($sub4_t * 0.33)) ? 1 : 0;
+
+        $sub5_t = (int)$data['SUB5_TMARKS'];
+        $sub5_obt = $updatedMarks['maths'];
+        $sub5_per = $sub5_t > 0 ? round(($sub5_obt / $sub5_t) * 100, 2) : 0;
+        $sub5_grade = get_grade($sub5_per);
+        $pass5 = ($sub5_obt >= ceil($sub5_t * 0.33)) ? 1 : 0;
+
+        $sub6_t = (int)$data['SUB6_TMARKS'];
+        $sub6_obt = $updatedMarks['marks6'];
+        $sub6_per = $sub6_t > 0 ? round(($sub6_obt / $sub6_t) * 100, 2) : 0;
+        $sub6_grade = get_grade($sub6_per);
+        $pass6 = ($sub6_obt >= ceil($sub6_t * 0.33)) ? 1 : 0;
+
+        $sub7_t = (int)$data['SUB7_TMARKS'];
+        $sub7_obt = $updatedMarks['marks7'];
+        $sub7_per = $sub7_t > 0 ? round(($sub7_obt / $sub7_t) * 100, 2) : 0;
+        $sub7_grade = get_grade($sub7_per);
+        $pass7 = ($sub7_obt >= ceil($sub7_t * 0.33)) ? 1 : 0;
+
+        $sub8_t = (int)$data['SUB8_TMARKS'];
+        $sub8_obt = $updatedMarks['marks8'];
+        $sub8_per = $sub8_t > 0 ? round(($sub8_obt / $sub8_t) * 100, 2) : 0;
+        $sub8_grade = get_grade($sub8_per);
+        $pass8 = ($sub8_obt >= ceil($sub8_t * 0.33)) ? 1 : 0;
+
+        $gazres = $sub1_obt + $sub2_obt + $sub3_obt + $sub4_obt + $sub5_obt + $sub6_obt + $sub7_obt + $sub8_obt + $sub9_obt;
+
+        $all_pass = ($pass1 && $pass2 && $pass3 && $pass4 && $pass5 && $pass6 && $pass7 && $pass8 && $pass9) ? 1 : 0;
+
         $updateQuery = "UPDATE NANA2024000_RESULT SET 
             NAME = ?, FATHER = ?, INST_NAME = ?,
             UR = ?, SUB1_PER = ?, SUB1_GRADE = ?, PASS1 = ?,
@@ -134,27 +152,22 @@
             MARKS8 = ?, SUB8_PER = ?, SUB8_GRADE = ?, PASS8 = ?,
             GAZRES = ?, PASS = ?
             WHERE RNO = ?";
-
         $stmt = mysqli_stmt_init($con);
         mysqli_stmt_prepare($stmt, $updateQuery);
-        mysqli_stmt_bind_param($stmt, "sss" .
-            "idsi" . "idsi" . "idsi" . "idsi" . "idsi" . "idsi" . "idsi" . "idsi" . "idsi" .
-            "ii",
-            $updatedFields['NAME'], $updatedFields['FATHER'], $updatedFields['INST_NAME'],
-            $updatedFields['UR'], $updatedFields['SUB1_PER'], $updatedFields['SUB1_GRADE'], $updatedFields['PASS1'],
-            $updatedFields['ENG'], $updatedFields['SUB2_PER'], $updatedFields['SUB2_GRADE'], $updatedFields['PASS2'],
-            $updatedFields['ISL'], $updatedFields['SUB3_PER'], $updatedFields['SUB3_GRADE'], $updatedFields['PASS3'],
-            $updatedFields['THQ'], $updatedFields['SUB9_PER'], $updatedFields['SUB9_GRADE'], $updatedFields['PASS9'],
-            $updatedFields['PS'], $updatedFields['SUB4_PER'], $updatedFields['SUB4_GRADE'], $updatedFields['PASS4'],
-            $updatedFields['MATHS'], $updatedFields['SUB5_PER'], $updatedFields['SUB5_GRADE'], $updatedFields['PASS5'],
-            $updatedFields['MARKS6'], $updatedFields['SUB6_PER'], $updatedFields['SUB6_GRADE'], $updatedFields['PASS6'],
-            $updatedFields['MARKS7'], $updatedFields['SUB7_PER'], $updatedFields['SUB7_GRADE'], $updatedFields['PASS7'],
-            $updatedFields['MARKS8'], $updatedFields['SUB8_PER'], $updatedFields['SUB8_GRADE'], $updatedFields['PASS8'],
-            $updatedFields['GAZRES'], $updatedFields['PASS'],
-            $rno
+        mysqli_stmt_bind_param($stmt, "sssidsiidsiidsiidsiidsiidsiidsiidsiidsiiii",
+            $updatedName, $updatedFather, $updatedInst,
+            $sub1_obt, $sub1_per, $sub1_grade, $pass1,
+            $sub2_obt, $sub2_per, $sub2_grade, $pass2,
+            $sub3_obt, $sub3_per, $sub3_grade, $pass3,
+            $sub9_obt, $sub9_per, $sub9_grade, $pass9,
+            $sub4_obt, $sub4_per, $sub4_grade, $pass4,
+            $sub5_obt, $sub5_per, $sub5_grade, $pass5,
+            $sub6_obt, $sub6_per, $sub6_grade, $pass6,
+            $sub7_obt, $sub7_per, $sub7_grade, $pass7,
+            $sub8_obt, $sub8_per, $sub8_grade, $pass8,
+            $gazres, $all_pass, $rno
         );
         mysqli_stmt_execute($stmt);
-
         echo "<script>alert('Result updated successfully!');</script>";
         // Refresh data after update
         $query = "SELECT * FROM NANA2024000_RESULT WHERE RNO = ?";
@@ -194,7 +207,6 @@
                 document.querySelectorAll('.marks-input').forEach(input => {
                     input.removeEventListener('input', calculateUpdates);
                 });
-                location.reload(); // Reset to original if cancel
             }
         }
 
@@ -221,9 +233,6 @@
                 else if (percentile >= 50) grade = 'D';
                 else grade = 'F';
                 row.querySelector('td:nth-child(5)').textContent = grade;
-
-                const remarks = (marksObtained >= totalMarks * 0.33) ? 'PASS' : '';
-                row.querySelector('td:nth-child(6)').textContent = remarks;
             });
 
             document.getElementById('totalMarks').textContent = totalMarksPossible;
@@ -233,14 +242,13 @@
         function updateResult() {
             const formData = new FormData();
             formData.append('update_roll_no', '<?php echo $rno; ?>');
-            // Append marks
-            document.querySelectorAll('.marks-input').forEach(input => {
-                formData.append(input.name, input.value);
-            });
-            // Append name, father, inst_name
             formData.append('name', document.querySelector('input[name="name"]').value);
             formData.append('father', document.querySelector('input[name="father"]').value);
             formData.append('inst_name', document.querySelector('input[name="inst_name"]').value);
+            document.querySelectorAll('.marks-input').forEach(input => {
+                const subject = input.getAttribute('name');
+                formData.append(subject, input.value);
+            });
 
             fetch(window.location.href, {
                 method: 'POST',
@@ -325,119 +333,101 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ((int)$data['SUB1_TMARKS'] > 0): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">Urdu</td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB1_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="ur" value="<?php echo trim($data['UR']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB1_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB1_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB1_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS1']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB2_TMARKS'] > 0): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">English</td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB2_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="eng" value="<?php echo trim($data['ENG']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB2_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB2_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB2_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS2']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB3_TMARKS'] > 0 && trim($data['APPEAR3'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR3']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="isl" value="<?php echo trim($data['ISL']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB3_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS3']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB9_TMARKS'] > 0 && trim($data['APPEAR9'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR9']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="thq" value="<?php echo trim($data['THQ']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB9_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS9']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB4_TMARKS'] > 0): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">Pakistan Studies</td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="ps" value="<?php echo trim($data['PS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB4_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS4']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB5_TMARKS'] > 0 && trim($data['APPEAR5'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR5']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="maths" value="<?php echo trim($data['MATHS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB5_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS5']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB6_TMARKS'] > 0 && trim($data['APPEAR6'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR6']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="marks6" value="<?php echo trim($data['MARKS6']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB6_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS6']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB7_TMARKS'] > 0 && trim($data['APPEAR7'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR7']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="marks7" value="<?php echo trim($data['MARKS7']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB7_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS7']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
-                            <?php if ((int)$data['SUB8_TMARKS'] > 0 && trim($data['APPEAR8'])): ?>
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR8']); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
                                     <input type="number" name="marks8" value="<?php echo trim($data['MARKS8']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold"><?php echo number_format($data['SUB8_PER'], 2); ?></td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_GRADE']); ?></td>
                                 <td class="border p-3 text-center"><?php echo trim($data['PASS8']) == '1' ? 'PASS' : ''; ?></td>
                             </tr>
-                            <?php endif; ?>
                             <tr class="bg-gray-200">
                                 <td class="border p-3 text-lg font-bold">Result</td>
                                 <td class="border p-3 text-center font-bold">
                                     <span id="totalMarks"><?php
-                                        $GTOTAL = (int)trim($data['SUB1_TMARKS']) + (int)trim($data['SUB2_TMARKS']) + (int)trim($data['SUB3_TMARKS']) + (int)trim($data['SUB9_TMARKS']) + (int)trim($data['SUB4_TMARKS']) + (int)trim($data['SUB5_TMARKS']) + (int)trim($data['SUB6_TMARKS']) + (int)trim($data['SUB7_TMARKS']) + (int)trim($data['SUB8_TMARKS']);
+                                        $GTOTAL = trim($data['SUB1_TMARKS']) + trim($data['SUB2_TMARKS']) + trim($data['SUB3_TMARKS']) + trim($data['SUB4_TMARKS']) + trim($data['SUB5_TMARKS']) + trim($data['SUB6_TMARKS']) + trim($data['SUB7_TMARKS']) + trim($data['SUB8_TMARKS']) + trim($data['SUB9_TMARKS']);
                                         echo $GTOTAL;
                                     ?></span>
                                 </td>
@@ -451,8 +441,13 @@
                 </div>
 
                 <div class="mt-6">
-                    <p class="text-base font-bold">NOTE 1: The marks awarded are the best prediction of the performance & has been awarded under COVID-19 Examination Policy, hence considered as valid and fair.</p>
-                    <p class="text-base font-bold">2: Errors and omissions are excepted. For any query send email at <a href="mailto:bise786@gmail.com" class="text-blue-600">bise786@gmail.com</a>.</p>
+                    <?php if ($data['PASS'] == 1): ?>
+                        <p class="text-base font-bold">NOTE 1: The marks awarded are the best prediction of the performance & has been awarded under COVID-19 Examination Policy, hence considered as valid and fair.</p>
+                        <p class="text-base font-bold">2: Errors and omissions are excepted. For any query send email at <a href="mailto:bise786@gmail.com" class="text-blue-600">bise786@gmail.com</a>.</p>
+                    <?php else: ?>
+                        <p class="text-base font-bold">NOTE:-</p>
+                        <p class="text-base font-bold">1: This result is a notice only. Errors and omissions are excepted. This computer generated result has no legal status. For any query send email at <a href="mailto:bise786@gmail.com" class="text-blue-600">bise786@gmail.com</a>.</p>
+                    <?php endif; ?>
                 </div>
             </div>
         <?php endif; ?>
