@@ -251,7 +251,7 @@
     <div class="container mx-auto p-4 max-w-4xl">
         <div class="text-center mb-8">
             <h1 class="text-2xl font-bold text-gray-800">BOARD OFF INTERMEDIATE AND SECONDARY EDUCATION DERA GHAZI KHAN</h1>
-            <h2 class="text-3xl font-semibold text-blue-900 mt-2">Online Result For SSC (Part-I) 1<sup>st</sup> Annual 2024</h2>
+            <h2 class="text-3xl font-semibold text-blue-900 mt-2">Online r Result For SSC (Part-I) 1<sup>st</sup> Annual 2024</h2>
         </div>
 
         <div class="bg-white shadow-md rounded-lg p-6 mx-auto max-w-lg no-print">
