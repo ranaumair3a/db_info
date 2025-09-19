@@ -1,3 +1,46 @@
+<?php
+// Handle AJAX update request
+if (isset($_POST['action']) && $_POST['action'] === 'update_result') {
+    header('Content-Type: application/json');
+    
+    include_once('config_seci.php');
+    
+    $rno = (int)$_POST['rno'];
+    $ur = (int)$_POST['ur'];
+    $eng = (int)$_POST['eng'];
+    $isl = (int)$_POST['isl'];
+    $thq = (int)$_POST['thq'];
+    $ps = (int)$_POST['ps'];
+    $maths = (int)$_POST['maths'];
+    $marks6 = (int)$_POST['marks6'];
+    $marks7 = (int)$_POST['marks7'];
+    $marks8 = (int)$_POST['marks8'];
+    
+    try {
+        $query = "UPDATE NANA2024000_RESULT SET 
+                  UR = ?, ENG = ?, ISL = ?, THQ = ?, PS = ?, 
+                  MATHS = ?, MARKS6 = ?, MARKS7 = ?, MARKS8 = ? 
+                  WHERE RNO = ?";
+        
+        $stmt = mysqli_stmt_init($con);
+        mysqli_stmt_prepare($stmt, $query);
+        mysqli_stmt_bind_param($stmt, "iiiiiiiiii", $ur, $eng, $isl, $thq, $ps, $maths, $marks6, $marks7, $marks8, $rno);
+        
+        if (mysqli_stmt_execute($stmt)) {
+            echo json_encode(['success' => true, 'message' => 'Result updated successfully!']);
+        } else {
+            echo json_encode(['success' => false, 'message' => 'Database update failed']);
+        }
+        
+        mysqli_stmt_close($stmt);
+        mysqli_close($con);
+        exit;
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+        exit;
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,169 +51,203 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @media print {
-            @page { margin-top: 0; margin-bottom: 0; }
-            body { padding-top: 72px; padding-bottom: 72px; }
-            .no-print { display: none; }
+            @page {
+                margin-top: 0;
+                margin-bottom: 0;
+            }
+            body {
+                padding-top: 72px;
+                padding-bottom: 72px;
+            }
+            .no-print {
+                display: none;
+            }
         }
     </style>
 </head>
 <body class="bg-gray-100 font-sans">
-    <?php
-    include_once('config_seci.php'); // Assuming this contains your DB connection
-
-    function escape($string) {
-        return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
-    }
-
-    $rno = 0;
-    if (isset($_POST['rno'])) {
-        $rno = (int)($_POST['rno']);
-    } else if (isset($_POST['update_roll_no'])) {
-        $rno = (int)($_POST['update_roll_no']);
-    }
-    $data = [];
-
-    if ($rno) {
-        $rno = escape($rno);
-        if (strlen($rno) != 6 || $rno < 100000 || $rno > 360000) {
-            echo "<div class='text-red-600 font-bold text-center'>Invalid Roll No.</div>";
-            exit();
-        }
-
-        $query = "SELECT * FROM NANA2024000_RESULT WHERE RNO = ?";
-        $stmt = mysqli_stmt_init($con);
-        mysqli_stmt_prepare($stmt, $query);
-        mysqli_stmt_bind_param($stmt, "i", $rno);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
-
-        if (mysqli_num_rows($result) < 1) {
-            echo "<div class='text-red-600 font-bold text-center'>Wrong Roll No</div>";
-            exit();
-        }
-
-        while ($row = mysqli_fetch_array($result)) {
-            $data = $row;
-        }
-    }
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_roll_no'])) {
-        $updatedMarks = [
-            'ur' => $_POST['ur'] ?? $data['UR'],
-            'eng' => $_POST['eng'] ?? $data['ENG'],
-            'isl' => $_POST['isl'] ?? $data['ISL'],
-            'thq' => $_POST['thq'] ?? $data['THQ'],
-            'ps' => $_POST['ps'] ?? $data['PS'],
-            'maths' => $_POST['maths'] ?? $data['MATHS'],
-            'marks6' => $_POST['marks6'] ?? $data['MARKS6'],
-            'marks7' => $_POST['marks7'] ?? $data['MARKS7'],
-            'marks8' => $_POST['marks8'] ?? $data['MARKS8']
-        ];
-
-        $updateQuery = "UPDATE NANA2024000_RESULT SET UR = ?, ENG = ?, ISL = ?, THQ = ?, PS = ?, MATHS = ?, MARKS6 = ?, MARKS7 = ?, MARKS8 = ? WHERE RNO = ?";
-        $stmt = mysqli_stmt_init($con);
-        mysqli_stmt_prepare($stmt, $updateQuery);
-        mysqli_stmt_bind_param($stmt, "iiiiiiiiii", $updatedMarks['ur'], $updatedMarks['eng'], $updatedMarks['isl'], $updatedMarks['thq'], $updatedMarks['ps'], $updatedMarks['maths'], $updatedMarks['marks6'], $updatedMarks['marks7'], $updatedMarks['marks8'], $rno);
-        mysqli_stmt_execute($stmt);
-        echo "<script>alert('Result updated successfully!');</script>";
-        // Refresh data after update
-        $query = "SELECT * FROM NANA2024000_RESULT WHERE RNO = ?";
-        $stmt = mysqli_stmt_init($con);
-        mysqli_stmt_prepare($stmt, $query);
-        mysqli_stmt_bind_param($stmt, "i", $rno);
-        mysqli_stmt_execute($stmt);
-        $result = mysqli_stmt_get_result($stmt);
-        $data = mysqli_fetch_array($result);
-    }
-    ?>
-
     <script>
         function maxLengthCheck(object) {
-            if (object.value.length > object.maxLength) object.value = object.value.slice(0, object.maxLength);
+            if (object.value.length > object.maxLength) {
+                object.value = object.value.slice(0, object.maxLength);
+            }
         }
 
-        function disableclick(event) {
-            if (event.button == 2) { alert("Right Click Disabled"); return false; }
-        }
+        // Disable right-click
         document.onmousedown = disableclick;
+        status = "Right Click Disabled";
+        function disableclick(event) {
+            if (event.button == 2) {
+                alert(status);
+                return false;
+            }
+        }
 
+        // Function to calculate grade based on percentage
+        function calculateGrade(percentage) {
+            if (percentage >= 80) return 'A+';
+            else if (percentage >= 70) return 'A';
+            else if (percentage >= 60) return 'B';
+            else if (percentage >= 50) return 'C';
+            else if (percentage >= 40) return 'D';
+            else if (percentage >= 33) return 'E';
+            else return 'F';
+        }
+
+        // Function to calculate percentile (simplified version)
+        function calculatePercentile(obtainedMarks, totalMarks) {
+            const percentage = (obtainedMarks / totalMarks) * 100;
+            return Math.round(percentage * 100) / 100; // Round to 2 decimal places
+        }
+
+        // Function to update calculations for a subject
+        function updateSubjectCalculations(marksInput, totalMarks, percentileCell, gradeCell) {
+            const obtainedMarks = parseInt(marksInput.value) || 0;
+            const total = parseInt(totalMarks);
+            
+            // Calculate and update percentile
+            const percentile = calculatePercentile(obtainedMarks, total);
+            percentileCell.textContent = percentile.toFixed(2);
+            
+            // Calculate and update grade
+            const percentage = (obtainedMarks / total) * 100;
+            const grade = calculateGrade(percentage);
+            gradeCell.textContent = grade;
+        }
+
+        // Function to update total marks
+        function updateTotalMarks() {
+            const marksInputs = document.querySelectorAll('.marks-input');
+            let totalObtained = 0;
+            
+            marksInputs.forEach(input => {
+                totalObtained += parseInt(input.value) || 0;
+            });
+            
+            document.getElementById('totalObtained').textContent = totalObtained;
+        }
+
+        // JavaScript for editing and updating fields
         function toggleEdit() {
             const inputs = document.querySelectorAll('.editable');
             const editButton = document.getElementById('editButton');
             const updateButton = document.getElementById('updateButton');
-            inputs.forEach(input => input.disabled = !input.disabled);
+            
+            inputs.forEach(input => {
+                input.disabled = !input.disabled;
+                if (!input.disabled) {
+                    input.classList.remove('bg-gray-50');
+                    input.classList.add('bg-white');
+                } else {
+                    input.classList.remove('bg-white');
+                    input.classList.add('bg-gray-50');
+                }
+            });
+            
             if (editButton.textContent === 'Edit') {
                 editButton.textContent = 'Cancel';
                 updateButton.classList.remove('hidden');
-                document.querySelectorAll('.marks-input').forEach(input => {
-                    input.addEventListener('input', calculateUpdates);
+                
+                // Add event listeners for real-time updates
+                const marksInputs = document.querySelectorAll('.marks-input');
+                marksInputs.forEach((input, index) => {
+                    input.addEventListener('input', function() {
+                        // Get corresponding cells
+                        const row = this.closest('tr');
+                        const totalMarksCell = row.querySelector('.total-marks');
+                        const percentileCell = row.querySelector('.percentile-score');
+                        const gradeCell = row.querySelector('.relative-grade');
+                        
+                        // Update calculations
+                        updateSubjectCalculations(this, totalMarksCell.textContent, percentileCell, gradeCell);
+                        
+                        // Update total marks
+                        updateTotalMarks();
+                    });
                 });
+                
             } else {
                 editButton.textContent = 'Edit';
                 updateButton.classList.add('hidden');
-                document.querySelectorAll('.marks-input').forEach(input => {
-                    input.removeEventListener('input', calculateUpdates);
+                
+                // Remove event listeners
+                const marksInputs = document.querySelectorAll('.marks-input');
+                marksInputs.forEach(input => {
+                    input.removeEventListener('input', updateSubjectCalculations);
                 });
             }
         }
 
-        function calculateUpdates() {
+        function updateResult() {
+            const rno = document.querySelector('input[name="current_rno"]').value;
             const marksInputs = document.querySelectorAll('.marks-input');
-            let totalMarksObtained = 0;
-            let totalMarksPossible = 0;
-
-            marksInputs.forEach(input => {
-                const row = input.closest('tr');
-                const totalMarks = parseInt(row.querySelector('td:nth-child(2)').textContent) || 0;
-                const marksObtained = parseInt(input.value) || 0;
-                totalMarksObtained += marksObtained;
-                totalMarksPossible += totalMarks;
-
-                const percentile = (marksObtained / totalMarks) * 100;
-                row.querySelector('td:nth-child(4)').textContent = percentile.toFixed(2);
-
-                let grade = '';
-                if (percentile >= 90) grade = 'A+';
-                else if (percentile >= 80) grade = 'A';
-                else if (percentile >= 70) grade = 'B';
-                else if (percentile >= 60) grade = 'C';
-                else if (percentile >= 50) grade = 'D';
-                else grade = 'F';
-                row.querySelector('td:nth-child(5)').textContent = grade;
-            });
-
-            document.getElementById('totalMarks').textContent = totalMarksPossible;
-            document.querySelector('tr.bg-gray-200 td:nth-child(3)').textContent = totalMarksObtained;
+            
+            // Collect all marks
+            const marksData = {
+                action: 'update_result',
+                rno: rno,
+                ur: marksInputs[0].value,
+                eng: marksInputs[1].value,
+                isl: marksInputs[2].value,
+                thq: marksInputs[3].value,
+                ps: marksInputs[4].value,
+                maths: marksInputs[5].value,
+                marks6: marksInputs[6].value,
+                marks7: marksInputs[7].value,
+                marks8: marksInputs[8].value
+            };
+            
+            // Send AJAX request
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '', true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            alert(response.message);
+                            toggleEdit(); // Disable inputs after successful update
+                        } else {
+                            alert('Error: ' + response.message);
+                        }
+                    } catch (e) {
+                        alert('Update successful!');
+                        toggleEdit();
+                    }
+                }
+            };
+            
+            // Convert data to URL encoded format
+            const urlEncodedData = Object.keys(marksData).map(key => 
+                encodeURIComponent(key) + '=' + encodeURIComponent(marksData[key])
+            ).join('&');
+            
+            xhr.send(urlEncodedData);
         }
 
-        function updateResult() {
-            const formData = new FormData();
-            formData.append('update_roll_no', '<?php echo $rno; ?>');
-            document.querySelectorAll('.marks-input').forEach(input => {
-                const subject = input.closest('tr').querySelector('td:nth-child(1)').textContent.toLowerCase();
-                formData.append(subject, input.value);
-            });
-
-            fetch(window.location.href, {
-                method: 'POST',
-                body: formData
-            }).then(response => {
-                location.reload(); // Reload to reflect updated data
-            }).catch(error => {
-                alert('Error updating result.');
-            });
+        function checkEmpty() {
+            const rno = document.forms["slip"]["rno"].value;
+            if (rno === "") {
+                alert("Please enter Roll Number");
+                return false;
+            }
+            return true;
         }
     </script>
 
     <div class="container mx-auto p-4 max-w-4xl">
+        <!-- Header Section -->
         <div class="text-center mb-8">
             <h1 class="text-2xl font-bold text-gray-800">BOARD OF INTERMEDIATE AND SECONDARY EDUCATION DERA GHAZI KHAN</h1>
             <h2 class="text-3xl font-semibold text-blue-900 mt-2">Online Result For SSC (Part-I) 1<sup>st</sup> Annual 2024</h2>
         </div>
 
+        <!-- Search Form -->
         <div class="bg-white shadow-md rounded-lg p-6 mx-auto max-w-lg no-print">
             <h3 class="text-xl font-semibold text-center mb-4">Search By Roll No</h3>
-            <form method="post" name="slip" action="" class="space-y-4">
+            <form method="post" name="slip" action="" onsubmit="return checkEmpty();" class="space-y-4">
                 <div class="flex items-center space-x-4">
                     <label class="text-lg font-semibold">Enter Your Roll No</label>
                     <input type="number" maxlength="6" name="rno" value="" placeholder="100001-200000 or 300000-360000"
@@ -182,7 +259,88 @@
             </form>
         </div>
 
-        <?php if ($rno && $data): ?>
+        <br><br>
+
+        <?php
+        include_once('config_seci.php');
+
+        function escape($string) {
+            return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+        }
+
+        $rno = 0;
+        if (isset($_POST['rno'])) {
+            $rno = (int)($_POST['rno']);
+            $DOB3 = $_POST['DOB'] ?? '';
+            $DOB2 = date_create($DOB3);
+            $DOB = date_format($DOB2, 'Y-m-d');
+        } else {
+            echo ".";
+            exit();
+        }
+        $rno = escape($rno);
+        if (strlen($rno) < 6 || strlen($rno) > 6) {
+            echo "<div class='text-red-600 font-bold text-center'>Roll No. consist of 6 digits only.</div>";
+            exit();
+        }
+
+        if ($rno < 100000 || $rno > 360000) {
+            echo "<div class='text-red-600 font-bold text-center'>Roll No. range is from 100000 to 200000 OR 300000 to 360000 only.</div>";
+            exit();
+        }
+
+        $rno = filter_var($rno, FILTER_SANITIZE_NUMBER_INT);
+        if (filter_var($rno, FILTER_VALIDATE_INT)) {
+        } else {
+            echo "<div class='text-red-600 font-bold text-center'>INVALID ROLL NO.</div>";
+            exit;
+        }
+
+        $data = array();
+        if (!filter_var($rno, FILTER_VALIDATE_INT) === false || !filter_var($rno, FILTER_VALIDATE_INT) === 0) {
+            $query = "select * from NANA2024000_RESULT where RNO=?;";
+            $stmt = mysqli_stmt_init($con);
+            mysqli_stmt_prepare($stmt, $query);
+            mysqli_stmt_bind_param($stmt, "i", $rno);
+            mysqli_stmt_execute($stmt);
+            $result = mysqli_stmt_get_result($stmt);
+
+            $num_rows = mysqli_num_rows($result);
+
+            if ($num_rows < 1) {
+                echo "<div class='text-red-600 font-bold text-center'>Wrong Roll No</div>";
+                exit;
+            }
+
+            while ($row = mysqli_fetch_array($result)) {
+                $data = $row;
+            }
+
+            $DISTT = trim($data['DISTRICT_N']);
+            $INST_CODE = trim($data['STATUS']);
+            $OBJECTION = trim($data['OBJECTION']);
+            $OBJECTION2 = trim($data['OBJECTION2']);
+
+            if ($OBJECTION == 1 || $OBJECTION2 == 1) {
+                $GAZRES = $data['GAZRES'];
+                ?>
+                <div class="text-center bg-white shadow-md rounded-lg p-6">
+                    <div class="text-lg font-bold">
+                        <p>Sr No: <?php echo trim($data['SRNO']); ?></p>
+                        <p>Roll No: <?php echo trim($data['RNO']); ?></p>
+                        <p>Name: <?php echo trim($data['NAME']); ?></p>
+                        <p><?php echo $data['GAZRES'] == 'ABSENT' ? "Result:" : "Result Block/Objection:"; ?> <?php echo trim($data['GAZRES']); ?></p>
+                    </div>
+                </div>
+                <?php
+                exit;
+            }
+            ?>
+
+            <!-- Hidden input to store current roll number for AJAX -->
+            <input type="hidden" name="current_rno" value="<?php echo trim($data['RNO']); ?>">
+
+            <!-- Result Section -->
             <div class="bg-white shadow-md rounded-lg p-6 mt-8">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center space-x-4">
@@ -197,8 +355,19 @@
                     <p class="text-lg font-bold">Reg No: <?php echo trim($data['REGNO']); ?></p>
                 </div>
                 <p class="text-base">SECONDARY SCHOOL CERTIFICATE (PART-I) 1<sup>st</sup> ANNUAL EXAMINATION 2024</p>
-                <p class="text-base font-bold">GROUP: <?php echo trim($data['S_GROUP']) == 'S' ? 'SCIENCE' : (trim($data['S_GROUP']) == 'G' ? 'GENERAL' : 'DEAF & DUMB'); ?></p>
+                <p class="text-base font-bold">GROUP: <?php
+                    $SGROUP = trim($data['S_GROUP']);
+                    if ($SGROUP == 'S') {
+                        $SGROUP = 'SCIENCE';
+                    } elseif ($SGROUP == 'G') {
+                        $SGROUP = 'GENERAL';
+                    } elseif ($SGROUP == 'D') {
+                        $SGROUP = 'DEAF & DUMB';
+                    }
+                    echo $SGROUP;
+                    ?></p>
 
+                <!-- Candidate Info -->
                 <div class="mt-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -211,16 +380,18 @@
                         </div>
                         <div>
                             <label class="text-lg font-semibold">Institute/District:</label>
-                            <input type="text" value="<?php echo trim($data['INST_NAME']); ?>" class="editable border rounded-lg p-2 w-full bg-gray-50" disabled>
+                            <input type="text" value="<?php echo $INST_CODE == 'R' ? trim($data['INST_NAME']) : $DISTT; ?>" class="editable border rounded-lg p-2 w-full bg-gray-50" disabled>
                         </div>
                     </div>
                 </div>
 
+                <!-- Edit and Update Buttons -->
                 <div class="mt-4 flex space-x-4 no-print">
                     <button id="editButton" onclick="toggleEdit()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Edit</button>
                     <button id="updateButton" onclick="updateResult()" class="hidden bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">Update</button>
                 </div>
 
+                <!-- Result Table -->
                 <div class="mt-6 overflow-x-auto">
                     <table class="w-full border-collapse">
                         <thead>
@@ -234,106 +405,137 @@
                             </tr>
                         </thead>
                         <tbody>
+                            <!-- Urdu -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">Urdu</td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB1_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB1_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="ur" value="<?php echo trim($data['UR']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['UR']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo ($data['SUB1_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB1_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS1']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo ($data['SUB1_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB1_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS1']) == '1' ? 'PASS' : (trim($data['PASS1']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- English -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">English</td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB2_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB2_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="eng" value="<?php echo trim($data['ENG']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['ENG']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo ($data['SUB2_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB2_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS2']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo ($data['SUB2_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB2_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS2']) == '1' ? 'PASS' : (trim($data['PASS2']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 3 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR3']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB3_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="isl" value="<?php echo trim($data['ISL']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['ISL']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB3_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS3']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB3_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB3_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS3']) == '1' ? 'PASS' : (trim($data['PASS3']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 9 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR9']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB9_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="thq" value="<?php echo trim($data['THQ']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['THQ']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB9_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS9']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB9_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB9_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS9']) == '1' ? 'PASS' : (trim($data['PASS9']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Pakistan Studies -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase">Pakistan Studies</td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB4_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="ps" value="<?php echo trim($data['PS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['PS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB4_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS4']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB4_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB4_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS4']) == '1' ? 'PASS' : (trim($data['PASS4']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 5 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR5']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB5_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="maths" value="<?php echo trim($data['MATHS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['MATHS']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB5_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS5']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB5_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB5_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS5']) == '1' ? 'PASS' : (trim($data['PASS5']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 6 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR6']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB6_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="marks6" value="<?php echo trim($data['MARKS6']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['MARKS6']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB6_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS6']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB6_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB6_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS6']) == '1' ? 'PASS' : (trim($data['PASS6']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 7 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR7']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB7_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="marks7" value="<?php echo trim($data['MARKS7']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['MARKS7']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB7_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS7']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB7_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB7_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS7']) == '1' ? 'PASS' : (trim($data['PASS7']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Subject 8 -->
                             <tr class="hover:bg-gray-50">
                                 <td class="border p-3 text-lg uppercase"><?php echo trim($data['APPEAR8']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_TMARKS']); ?></td>
+                                <td class="border p-3 text-center font-bold total-marks"><?php echo trim($data['SUB8_TMARKS']); ?></td>
                                 <td class="border p-3 text-center font-bold">
-                                    <input type="number" name="marks8" value="<?php echo trim($data['MARKS8']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
+                                    <input type="number" value="<?php echo trim($data['MARKS8']); ?>" class="marks-input editable border rounded-lg p-1 w-20 text-center bg-gray-50" disabled>
                                 </td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_PER']); ?></td>
-                                <td class="border p-3 text-center font-bold"><?php echo trim($data['SUB8_GRADE']); ?></td>
-                                <td class="border p-3 text-center"><?php echo trim($data['PASS8']) == '1' ? 'PASS' : ''; ?></td>
+                                <td class="border p-3 text-center font-bold percentile-score"><?php echo trim($data['SUB8_PER']); ?></td>
+                                <td class="border p-3 text-center font-bold relative-grade"><?php echo trim($data['SUB8_GRADE']); ?></td>
+                                <td class="border p-3 text-center"><?php echo trim($data['PASS8']) == '1' ? 'PASS' : (trim($data['PASS8']) == '0' ? '' : ''); ?></td>
                             </tr>
+                            <!-- Total -->
                             <tr class="bg-gray-200">
                                 <td class="border p-3 text-lg font-bold">Result</td>
                                 <td class="border p-3 text-center font-bold">
                                     <span id="totalMarks"><?php
-                                        $GTOTAL = trim($data['SUB1_TMARKS']) + trim($data['SUB2_TMARKS']) + trim($data['SUB3_TMARKS']) + trim($data['SUB4_TMARKS']) + trim($data['SUB5_TMARKS']) + trim($data['SUB6_TMARKS']) + trim($data['SUB7_TMARKS']) + trim($data['SUB8_TMARKS']) + trim($data['SUB9_TMARKS']);
+                                        $GTOTAL = trim($data['SUB1_TMARKS']) +
+                                            trim($data['SUB2_TMARKS']) +
+                                            trim($data['SUB3_TMARKS']) +
+                                            trim($data['SUB4_TMARKS']) +
+                                            trim($data['SUB5_TMARKS']) +
+                                            trim($data['SUB6_TMARKS']) +
+                                            trim($data['SUB7_TMARKS']) +
+                                            trim($data['SUB8_TMARKS']) +
+                                            trim($data['SUB9_TMARKS']);
                                         echo $GTOTAL;
-                                    ?></span>
+                                        ?></span>
+                                </td>
+                                <td class="border p-3 text-center font-bold">
+                                    <span id="totalObtained"><?php 
+                                        $OBTAINED_TOTAL = trim($data['UR']) +
+                                            trim($data['ENG']) +
+                                            trim($data['ISL']) +
+                                            trim($data['THQ']) +
+                                            trim($data['PS']) +
+                                            trim($data['MATHS']) +
+                                            trim($data['MARKS6']) +
+                                            trim($data['MARKS7']) +
+                                            trim($data['MARKS8']);
+                                        echo $OBTAINED_TOTAL;
+                                        ?></span>
                                 </td>
                                 <td class="border p-3 text-center font-bold"><?php echo trim($data['GAZRES']); ?></td>
-                                <td class="border p-3"></td>
                                 <td class="border p-3"></td>
                                 <td class="border p-3"></td>
                             </tr>
@@ -341,12 +543,21 @@
                     </table>
                 </div>
 
+                <!-- Notes -->
                 <div class="mt-6">
-                    <p class="text-base font-bold">NOTE 1: The marks awarded are the best prediction of the performance & has been awarded under COVID-19 Examination Policy, hence considered as valid and fair.</p>
-                    <p class="text-base font-bold">2: Errors and omissions are excepted. For any query send email at <a href="mailto:bise786@gmail.com" class="text-blue-600">bise786@gmail.com</a>.</p>
+                    <?php if (trim($data['PASS']) == 1) { ?>
+                        <p class="text-base font-bold">NOTE 1: The marks awarded are the best prediction of the performance & has been awarded under COVID-19 Examination Policy, hence considered as valid and fair.</p>
+                        <p class="text-base font-bold">2: Errors and omissions are excepted. For any query send email at <a href="mailto:bise786@gmail.com" class="text-blue-600">bise786@gmail.com</a>.</p>
+                    <?php } else { ?>
+                        <p class="text-base font-bold">NOTE:</p>
+                        <p class="text-base font-bold">1: The candidate shall appear in the absent subject(s) along with compulsory subjects in annual examinations 2022.</p>
+                        <p class="text-base font-bold">2: The marks awarded are the best prediction of the performance & has been awarded under COVID-19 Examination Policy, hence considered as valid and fair.</p>
+                    <?php } ?>
                 </div>
             </div>
-        <?php endif; ?>
+        <?php } else { ?>
+            <div class="text-red-600 font-bold text-center">Invalid input</div>
+        <?php } ?>
     </div>
 </body>
 </html>
