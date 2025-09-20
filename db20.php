@@ -60,54 +60,38 @@ class DatabaseManager {
         }
     }
     
-    public function getTables($database) {
-        try {
-            $stmt = $this->connection->query("SHOW TABLES FROM `$database`");
-            return $stmt->fetchAll(PDO::FETCH_COLUMN);
-        } catch (PDOException $e) {
-            return [];
-        }
-    }
-    
-    public function getTableInfo($database, $table) {
+    public function getTablesWithInfo($database) {
         try {
             $info = [];
             
-            // Get basic table info
-            $stmt = $this->connection->query("SHOW TABLE STATUS FROM `$database` WHERE Name = '$table'");
-            $tableStatus = $stmt->fetch();
+            // Get all table statuses in one query
+            $stmt = $this->connection->query("SHOW TABLE STATUS FROM `$database`");
+            $statuses = $stmt->fetchAll();
             
-            // Get column count
-            $stmt = $this->connection->query("SELECT COUNT(*) as column_count FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '$database' AND TABLE_NAME = '$table'");
-            $columnInfo = $stmt->fetch();
+            // Get all column counts in one query
+            $colStmt = $this->connection->query("SELECT TABLE_NAME, COUNT(*) as column_count 
+                                                 FROM INFORMATION_SCHEMA.COLUMNS 
+                                                 WHERE TABLE_SCHEMA = '$database' 
+                                                 GROUP BY TABLE_NAME");
+            $columns = $colStmt->fetchAll(PDO::FETCH_KEY_PAIR);
             
-            // Get row count
-            $stmt = $this->connection->query("SELECT COUNT(*) as row_count FROM `$database`.`$table`");
-            $rowInfo = $stmt->fetch();
-            
-            $info = [
-                'name' => $table,
-                'engine' => $tableStatus['Engine'] ?? 'Unknown',
-                'rows' => $rowInfo['row_count'] ?? 0,
-                'columns' => $columnInfo['column_count'] ?? 0,
-                'size' => $this->formatBytes(($tableStatus['Data_length'] ?? 0) + ($tableStatus['Index_length'] ?? 0)),
-                'created' => $tableStatus['Create_time'] ?? 'Unknown',
-                'updated' => $tableStatus['Update_time'] ?? 'Unknown',
-                'collation' => $tableStatus['Collation'] ?? 'Unknown'
-            ];
+            foreach ($statuses as $status) {
+                $table = $status['Name'];
+                $info[] = [
+                    'name' => $table,
+                    'engine' => $status['Engine'] ?? 'Unknown',
+                    'rows' => $status['Rows'] ?? 0,  // Approximate rows (fast)
+                    'columns' => $columns[$table] ?? 0,
+                    'size' => $this->formatBytes(($status['Data_length'] ?? 0) + ($status['Index_length'] ?? 0)),
+                    'created' => $status['Create_time'] ?? 'Unknown',
+                    'updated' => $status['Update_time'] ?? 'Unknown',
+                    'collation' => $status['Collation'] ?? 'Unknown'
+                ];
+            }
             
             return $info;
         } catch (PDOException $e) {
-            return [
-                'name' => $table,
-                'engine' => 'Unknown',
-                'rows' => 0,
-                'columns' => 0,
-                'size' => '0 B',
-                'created' => 'Unknown',
-                'updated' => 'Unknown',
-                'collation' => 'Unknown'
-            ];
+            return [];
         }
     }
     
@@ -166,10 +150,12 @@ class DatabaseManager {
         return $columns;
     }
     
-    public function getTableData($database, $table, $limit = 25, $offset = 0, $orderBy = '', $orderDir = 'ASC') {
+    public function getTableData($database, $table, $limit = 100, $offset = 0, $orderBy = '', $orderDir = 'ASC') {
         try {
-            $countStmt = $this->connection->query("SELECT COUNT(*) FROM `$database`.`$table`");
-            $totalRows = $countStmt->fetchColumn();
+            // Use approximate row count for total (fast)
+            $statusStmt = $this->connection->query("SHOW TABLE STATUS FROM `$database` WHERE Name = '$table'");
+            $status = $statusStmt->fetch();
+            $totalRows = $status['Rows'] ?? 0;
             
             $query = "SELECT * FROM `$database`.`$table`";
             if ($orderBy) {
@@ -226,7 +212,7 @@ class DatabaseManager {
             $createTable = $stmt->fetch();
             $sql .= $createTable['Create Table'] . ";\n\n";
             
-            // Get data
+            // Get data row by row to avoid memory issues
             $stmt = $this->connection->query("SELECT * FROM `$database`.`$table`");
             while ($row = $stmt->fetch()) {
                 $values = array_map(function($value) {
@@ -283,11 +269,7 @@ if ($_POST && isset($_POST['ajax'])) {
         
         switch ($_POST['action']) {
             case 'get_tables':
-                $tables = $dbManager->getTables($_POST['database']);
-                $tablesWithInfo = [];
-                foreach ($tables as $table) {
-                    $tablesWithInfo[] = $dbManager->getTableInfo($_POST['database'], $table);
-                }
+                $tablesWithInfo = $dbManager->getTablesWithInfo($_POST['database']);
                 echo json_encode($tablesWithInfo);
                 break;
                 
@@ -1807,7 +1789,7 @@ if (isset($_SESSION['db_connection'])) {
                         <div class="stats-grid">
                             <div class="stat-card">
                                 <div class="stat-number">${result.total}</div>
-                                <div class="stat-label">Total Rows</div>
+                                <div class="stat-label">Total Rows (approx.)</div>
                             </div>
                             <div class="stat-card">
                                 <div class="stat-number">${result.columns.length}</div>
@@ -1904,7 +1886,7 @@ if (isset($_SESSION['db_connection'])) {
                     }
                     
                     html += `<p style="margin-top: 15px; color: #718096; text-align: center;">
-                        Showing ${result.data.length} of ${result.total} rows
+                        Showing ${result.data.length} of ${result.total} rows (approx.)
                         ${totalPages > 1 ? `(Page ${currentPage + 1} of ${totalPages})` : ''}
                     </p>`;
                 } else {
