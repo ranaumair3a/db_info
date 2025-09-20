@@ -18,7 +18,7 @@ class DatabaseManager {
     public function __construct() {
         $this->config = [
             'title' => 'DataHub Pro',
-            'version' => '3.1.0',
+            'version' => '2.1.0',
             'theme' => 'modern'
         ];
     }
@@ -192,6 +192,33 @@ class DatabaseManager {
 // Initialize the database manager
 $dbManager = new DatabaseManager();
 
+// Handle AJAX requests first
+if ($_POST && isset($_POST['ajax'])) {
+    header('Content-Type: application/json');
+    
+    if (isset($_SESSION['db_connection'])) {
+        $conn = $_SESSION['db_connection'];
+        $dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port']);
+        
+        switch ($_POST['action']) {
+            case 'get_tables':
+                echo json_encode($dbManager->getTables($_POST['database']));
+                break;
+                
+            case 'get_table_data':
+                echo json_encode($dbManager->getTableData($_POST['database'], $_POST['table']));
+                break;
+                
+            case 'get_table_structure':
+                echo json_encode($dbManager->getTableStructure($_POST['database'], $_POST['table']));
+                break;
+        }
+    } else {
+        echo json_encode(['error' => 'Not connected']);
+    }
+    exit;
+}
+
 // Handle form submissions
 if ($_POST) {
     if (isset($_POST['action'])) {
@@ -339,6 +366,7 @@ if (isset($_SESSION['db_connection'])) {
             text-decoration: none;
             display: inline-block;
             text-align: center;
+            margin: 2px;
         }
         
         .btn-primary {
@@ -356,6 +384,10 @@ if (isset($_SESSION['db_connection'])) {
             color: white;
         }
         
+        .btn-secondary:hover {
+            background: #4a5568;
+        }
+        
         .btn-danger {
             background: #e53e3e;
             color: white;
@@ -366,11 +398,21 @@ if (isset($_SESSION['db_connection'])) {
             color: white;
         }
         
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 20px;
             margin-bottom: 20px;
+        }
+        
+        .layout {
+            display: flex;
+            gap: 20px;
         }
         
         .sidebar {
@@ -379,17 +421,19 @@ if (isset($_SESSION['db_connection'])) {
             border-radius: 15px;
             padding: 20px;
             height: fit-content;
+            min-width: 250px;
         }
         
         .main-content {
             flex: 1;
-            margin-left: 20px;
         }
         
         .table-container {
             overflow-x: auto;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-height: 500px;
+            overflow-y: auto;
         }
         
         table {
@@ -402,12 +446,16 @@ if (isset($_SESSION['db_connection'])) {
             padding: 12px;
             text-align: left;
             border-bottom: 1px solid #e2e8f0;
+            word-break: break-word;
+            max-width: 300px;
         }
         
         th {
             background: #f7fafc;
             font-weight: 600;
             color: #4a5568;
+            position: sticky;
+            top: 0;
         }
         
         tr:hover {
@@ -440,23 +488,33 @@ if (isset($_SESSION['db_connection'])) {
         
         .db-list {
             list-style: none;
+            max-height: 300px;
+            overflow-y: auto;
         }
         
-        .db-list li {
-            padding: 8px 12px;
+        .db-list li, .table-list li {
+            padding: 10px 12px;
             border-radius: 6px;
             margin-bottom: 5px;
             cursor: pointer;
-            transition: background 0.3s ease;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
         }
         
-        .db-list li:hover {
+        .db-list li:hover, .table-list li:hover {
             background: #e2e8f0;
         }
         
-        .db-list li.active {
+        .db-list li.active, .table-list li.active {
             background: #667eea;
             color: white;
+            border-color: #4c63d2;
+        }
+        
+        .table-list {
+            list-style: none;
+            max-height: 400px;
+            overflow-y: auto;
         }
         
         .connection-status {
@@ -492,14 +550,28 @@ if (isset($_SESSION['db_connection'])) {
             background: #e53e3e;
         }
         
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #718096;
+        }
+        
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #4a5568;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #e2e8f0;
+            padding-bottom: 5px;
+        }
+        
         @media (max-width: 768px) {
-            .grid {
-                grid-template-columns: 1fr;
+            .layout {
+                flex-direction: column;
             }
             
-            .main-content {
-                margin-left: 0;
-                margin-top: 20px;
+            .grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -517,7 +589,7 @@ if (isset($_SESSION['db_connection'])) {
             <?php if ($isConnected): ?>
                 <form method="post" style="margin-left: auto;">
                     <input type="hidden" name="action" value="disconnect">
-                    <button type="submit" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px;">Disconnect</button>
+                    <button type="submit" class="btn btn-danger btn-small">Disconnect</button>
                 </form>
             <?php endif; ?>
         </div>
@@ -555,21 +627,23 @@ if (isset($_SESSION['db_connection'])) {
                 </form>
             </div>
         <?php else: ?>
-            <div style="display: flex; gap: 20px;">
+            <div class="layout">
                 <div class="sidebar">
-                    <h3>Databases</h3>
-                    <ul class="db-list">
+                    <div class="section-title">Databases</div>
+                    <ul class="db-list" id="database-list">
                         <?php
                         $databases = $dbManager->getDatabases();
                         foreach ($databases as $db):
                         ?>
-                            <li onclick="selectDatabase('<?php echo htmlspecialchars($db); ?>')" style="cursor: pointer;"><?php echo htmlspecialchars($db); ?></li>
+                            <li onclick="selectDatabase('<?php echo htmlspecialchars($db); ?>')" data-database="<?php echo htmlspecialchars($db); ?>">
+                                <?php echo htmlspecialchars($db); ?>
+                            </li>
                         <?php endforeach; ?>
                     </ul>
                     
                     <div id="tables-section" style="display: none;">
-                        <h3>Tables</h3>
-                        <ul id="tables-list" class="db-list"></ul>
+                        <div class="section-title">Tables</div>
+                        <ul id="tables-list" class="table-list"></ul>
                     </div>
                 </div>
                 
@@ -579,9 +653,10 @@ if (isset($_SESSION['db_connection'])) {
                         <form method="post">
                             <input type="hidden" name="action" value="query">
                             <div class="form-group">
-                                <textarea name="query" class="form-control query-editor" placeholder="Enter your SQL query here..."></textarea>
+                                <textarea name="query" class="form-control query-editor" placeholder="Enter your SQL query here..." id="query-input"></textarea>
                             </div>
                             <button type="submit" class="btn btn-primary">Execute Query</button>
+                            <button type="button" class="btn btn-secondary" onclick="clearQuery()">Clear</button>
                         </form>
                     </div>
                     
@@ -627,8 +702,13 @@ if (isset($_SESSION['db_connection'])) {
                     <?php endif; ?>
                     
                     <div id="table-data" class="card" style="display: none;">
-                        <h3>Table Data</h3>
+                        <h3 id="table-title">Table Data</h3>
                         <div id="table-content"></div>
+                    </div>
+                    
+                    <div id="table-structure" class="card" style="display: none;">
+                        <h3>Table Structure</h3>
+                        <div id="structure-content"></div>
                     </div>
                 </div>
             </div>
@@ -636,25 +716,34 @@ if (isset($_SESSION['db_connection'])) {
     </div>
     
     <script>
+        let currentDatabase = '';
+        let currentTable = '';
+        
         function selectDatabase(database) {
+            currentDatabase = database;
+            
             // Highlight selected database
             document.querySelectorAll('.db-list li').forEach(li => li.classList.remove('active'));
-            event.target.classList.add('active');
+            document.querySelector(`[data-database="${database}"]`).classList.add('active');
             
             // Load tables for this database
             loadTables(database);
+            
+            // Hide table data
+            document.getElementById('table-data').style.display = 'none';
+            document.getElementById('table-structure').style.display = 'none';
         }
         
         function loadTables(database) {
-            // Show loading state
             const tablesSection = document.getElementById('tables-section');
             const tablesList = document.getElementById('tables-list');
             
             tablesSection.style.display = 'block';
-            tablesList.innerHTML = '<li>Loading tables...</li>';
+            tablesList.innerHTML = '<li class="loading">Loading tables...</li>';
             
-            // Create form data
+            // Make AJAX request
             const formData = new FormData();
+            formData.append('ajax', '1');
             formData.append('action', 'get_tables');
             formData.append('database', database);
             
@@ -662,52 +751,54 @@ if (isset($_SESSION['db_connection'])) {
                 method: 'POST',
                 body: formData
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
-            .then(text => {
-                try {
-                    const tables = JSON.parse(text);
-                    tablesList.innerHTML = '';
-                    
-                    if (tables.length === 0) {
-                        tablesList.innerHTML = '<li>No tables found</li>';
-                        return;
-                    }
-                    
+            .then(response => response.json())
+            .then(tables => {
+                tablesList.innerHTML = '';
+                
+                if (tables.length > 0) {
                     tables.forEach(table => {
                         const li = document.createElement('li');
                         li.textContent = table;
-                        li.onclick = () => loadTableData(database, table);
+                        li.setAttribute('data-table', table);
+                        li.onclick = () => selectTable(database, table, li);
                         tablesList.appendChild(li);
                     });
-                } catch (e) {
-                    tablesList.innerHTML = '<li>Error loading tables</li>';
-                    console.error('JSON parse error:', e, text);
+                } else {
+                    tablesList.innerHTML = '<li style="color: #718096;">No tables found</li>';
                 }
             })
             .catch(error => {
-                tablesList.innerHTML = '<li>Error loading tables</li>';
-                console.error('Fetch error:', error);
+                console.error('Error:', error);
+                tablesList.innerHTML = '<li style="color: #e53e3e;">Error loading tables</li>';
             });
+        }
+        
+        function selectTable(database, table, element) {
+            currentTable = table;
+            
+            // Highlight selected table
+            document.querySelectorAll('.table-list li').forEach(li => li.classList.remove('active'));
+            element.classList.add('active');
+            
+            // Load table data
+            loadTableData(database, table);
+            
+            // Update query input with SELECT statement
+            document.getElementById('query-input').value = `SELECT * FROM \`${database}\`.\`${table}\` LIMIT 100;`;
         }
         
         function loadTableData(database, table) {
             const tableDataDiv = document.getElementById('table-data');
             const tableContent = document.getElementById('table-content');
+            const tableTitle = document.getElementById('table-title');
             
             tableDataDiv.style.display = 'block';
-            tableContent.innerHTML = '<p>Loading table data...</p>';
+            tableTitle.textContent = `Table: ${table}`;
+            tableContent.innerHTML = '<div class="loading">Loading table data...</div>';
             
-            // Highlight selected table
-            document.querySelectorAll('#tables-list li').forEach(li => li.classList.remove('active'));
-            event.target.classList.add('active');
-            
-            // Create form data
+            // Make AJAX request for table data
             const formData = new FormData();
+            formData.append('ajax', '1');
             formData.append('action', 'get_table_data');
             formData.append('database', database);
             formData.append('table', table);
@@ -716,72 +807,65 @@ if (isset($_SESSION['db_connection'])) {
                 method: 'POST',
                 body: formData
             })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-                return response.text();
-            })
-            .then(text => {
-                try {
-                    const result = JSON.parse(text);
+            .then(response => response.json())
+            .then(result => {
+                if (result.success && result.data) {
+                    let html = `
+                        <div style="margin-bottom: 15px;">
+                            <button class="btn btn-secondary btn-small" onclick="exportTable('${database}', '${table}', 'sql')">Export SQL</button>
+                            <button class="btn btn-secondary btn-small" onclick="exportTable('${database}', '${table}', 'csv')">Export CSV</button>
+                            <button class="btn btn-secondary btn-small" onclick="showTableStructure('${database}', '${table}')">View Structure</button>
+                        </div>`;
                     
-                    if (result.success) {
-                        let html = `
-                            <div style="margin-bottom: 15px;">
-                                <h4>Table: ${table}</h4>
-                                <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'sql')">Export SQL</button>
-                                <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'csv')">Export CSV</button>
-                                <button class="btn btn-primary" onclick="showTableStructure('${database}', '${table}')">Show Structure</button>
-                            </div>`;
-                        
-                        if (result.data && result.data.length > 0) {
-                            html += `<div class="table-container">
+                    if (result.data.length > 0) {
+                        html += `
+                            <div class="table-container">
                                 <table>
                                     <thead>
                                         <tr>`;
-                            
-                            result.columns.forEach(column => {
-                                html += `<th>${escapeHtml(column)}</th>`;
-                            });
-                            
-                            html += `</tr></thead><tbody>`;
-                            
-                            result.data.forEach(row => {
-                                html += '<tr>';
-                                Object.values(row).forEach(value => {
-                                    html += `<td>${escapeHtml(value || 'NULL')}</td>`;
-                                });
-                                html += '</tr>';
-                            });
-                            
-                            html += `</tbody></table></div>`;
-                            html += `<p><strong>Showing ${result.data.length} of ${result.total} rows</strong></p>`;
-                        } else {
-                            html += '<p>No data found in this table.</p>';
-                        }
                         
-                        tableContent.innerHTML = html;
+                        result.columns.forEach(column => {
+                            html += `<th>${column}</th>`;
+                        });
+                        
+                        html += `</tr></thead><tbody>`;
+                        
+                        result.data.forEach(row => {
+                            html += '<tr>';
+                            Object.values(row).forEach(value => {
+                                const displayValue = value === null ? '<em>NULL</em>' : (value === '' ? '<em>empty</em>' : String(value));
+                                html += `<td>${displayValue}</td>`;
+                            });
+                            html += '</tr>';
+                        });
+                        
+                        html += `</tbody></table></div>`;
+                        html += `<p style="margin-top: 10px; color: #718096;">Showing ${result.data.length} of ${result.total} rows</p>`;
                     } else {
-                        tableContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(result.error)}</div>`;
+                        html += '<p style="color: #718096;">No data found in this table.</p>';
                     }
-                } catch (e) {
-                    tableContent.innerHTML = '<div class="alert alert-danger">Error parsing response</div>';
-                    console.error('JSON parse error:', e, text);
+                    
+                    tableContent.innerHTML = html;
+                } else {
+                    tableContent.innerHTML = `<div class="alert alert-danger">Error: ${result.error || 'Failed to load table data'}</div>`;
                 }
             })
             .catch(error => {
+                console.error('Error:', error);
                 tableContent.innerHTML = '<div class="alert alert-danger">Error loading table data</div>';
-                console.error('Fetch error:', error);
             });
         }
         
         function showTableStructure(database, table) {
-            const tableContent = document.getElementById('table-content');
-            tableContent.innerHTML = '<p>Loading table structure...</p>';
+            const structureDiv = document.getElementById('table-structure');
+            const structureContent = document.getElementById('structure-content');
             
-            // Create form data
+            structureDiv.style.display = 'block';
+            structureContent.innerHTML = '<div class="loading">Loading table structure...</div>';
+            
+            // Make AJAX request for table structure
             const formData = new FormData();
+            formData.append('ajax', '1');
             formData.append('action', 'get_table_structure');
             formData.append('database', database);
             formData.append('table', table);
@@ -790,16 +874,10 @@ if (isset($_SESSION['db_connection'])) {
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.text())
-            .then(text => {
-                try {
-                    const result = JSON.parse(text);
-                    
+            .then(response => response.json())
+            .then(structure => {
+                if (structure && structure.length > 0) {
                     let html = `
-                        <div style="margin-bottom: 15px;">
-                            <h4>Structure: ${table}</h4>
-                            <button class="btn btn-primary" onclick="loadTableData('${database}', '${table}')">Show Data</button>
-                        </div>
                         <div class="table-container">
                             <table>
                                 <thead>
@@ -814,22 +892,27 @@ if (isset($_SESSION['db_connection'])) {
                                 </thead>
                                 <tbody>`;
                     
-                    result.forEach(column => {
-                        html += `<tr>
-                            <td><strong>${escapeHtml(column.Field)}</strong></td>
-                            <td>${escapeHtml(column.Type)}</td>
-                            <td>${escapeHtml(column.Null)}</td>
-                            <td>${escapeHtml(column.Key)}</td>
-                            <td>${escapeHtml(column.Default || '')}</td>
-                            <td>${escapeHtml(column.Extra || '')}</td>
-                        </tr>`;
+                    structure.forEach(field => {
+                        html += `
+                            <tr>
+                                <td><strong>${field.Field}</strong></td>
+                                <td>${field.Type}</td>
+                                <td>${field.Null}</td>
+                                <td>${field.Key || ''}</td>
+                                <td>${field.Default || '<em>NULL</em>'}</td>
+                                <td>${field.Extra || ''}</td>
+                            </tr>`;
                     });
                     
                     html += `</tbody></table></div>`;
-                    tableContent.innerHTML = html;
-                } catch (e) {
-                    tableContent.innerHTML = '<div class="alert alert-danger">Error loading table structure</div>';
+                    structureContent.innerHTML = html;
+                } else {
+                    structureContent.innerHTML = '<div class="alert alert-danger">Error loading table structure</div>';
                 }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                structureContent.innerHTML = '<div class="alert alert-danger">Error loading table structure</div>';
             });
         }
         
@@ -847,79 +930,70 @@ if (isset($_SESSION['db_connection'])) {
             document.body.removeChild(form);
         }
         
-        function escapeHtml(text) {
-            const map = {
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#039;'
-            };
-            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        function clearQuery() {
+            document.getElementById('query-input').value = '';
         }
         
-        // Auto-select first database on page load
+        // Auto-select first database on load
         document.addEventListener('DOMContentLoaded', function() {
             const firstDb = document.querySelector('.db-list li');
             if (firstDb) {
-                setTimeout(() => {
-                    firstDb.click();
-                }, 500);
+                const dbName = firstDb.getAttribute('data-database');
+                if (dbName) {
+                    selectDatabase(dbName);
+                }
             }
         });
+        
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl+Enter to execute query
+            if (e.ctrlKey && e.key === 'Enter') {
+                const queryForm = document.querySelector('form[method="post"]');
+                if (queryForm && document.getElementById('query-input').value.trim()) {
+                    queryForm.submit();
+                }
+            }
+            
+            // Ctrl+K to clear query
+            if (e.ctrlKey && e.key === 'k') {
+                e.preventDefault();
+                clearQuery();
+                document.getElementById('query-input').focus();
+            }
+        });
+        
+        // Add query templates
+        function insertQueryTemplate(type) {
+            const queryInput = document.getElementById('query-input');
+            let template = '';
+            
+            switch(type) {
+                case 'select':
+                    template = currentTable ? 
+                        `SELECT * FROM \`${currentDatabase}\`.\`${currentTable}\` WHERE 1 LIMIT 100;` :
+                        'SELECT * FROM table_name WHERE condition LIMIT 100;';
+                    break;
+                case 'insert':
+                    template = currentTable ?
+                        `INSERT INTO \`${currentDatabase}\`.\`${currentTable}\` (column1, column2) VALUES ('value1', 'value2');` :
+                        'INSERT INTO table_name (column1, column2) VALUES (\'value1\', \'value2\');';
+                    break;
+                case 'update':
+                    template = currentTable ?
+                        `UPDATE \`${currentDatabase}\`.\`${currentTable}\` SET column1 = 'new_value' WHERE condition;` :
+                        'UPDATE table_name SET column1 = \'new_value\' WHERE condition;';
+                    break;
+                case 'delete':
+                    template = currentTable ?
+                        `DELETE FROM \`${currentDatabase}\`.\`${currentTable}\` WHERE condition;` :
+                        'DELETE FROM table_name WHERE condition;';
+                    break;
+            }
+            
+            queryInput.value = template;
+            queryInput.focus();
+        }
     </script>
 </body>
 </html>
-
-<?php
-// Handle AJAX requests
-if ($_POST && isset($_POST['action'])) {
-    if ($_POST['action'] === 'get_tables') {
-        header('Content-Type: application/json');
-        if (isset($_SESSION['db_connection'])) {
-            $conn = $_SESSION['db_connection'];
-            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
-                $tables = $dbManager->getTables($_POST['database']);
-                echo json_encode($tables);
-            } else {
-                echo json_encode([]);
-            }
-        } else {
-            echo json_encode([]);
-        }
-        exit;
-    }
-    
-    if ($_POST['action'] === 'get_table_data') {
-        header('Content-Type: application/json');
-        if (isset($_SESSION['db_connection'])) {
-            $conn = $_SESSION['db_connection'];
-            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
-                $result = $dbManager->getTableData($_POST['database'], $_POST['table']);
-                echo json_encode($result);
-            } else {
-                echo json_encode(['success' => false, 'error' => 'Connection failed']);
-            }
-        } else {
-            echo json_encode(['success' => false, 'error' => 'No active connection']);
-        }
-        exit;
-    }
-    
-    if ($_POST['action'] === 'get_table_structure') {
-        header('Content-Type: application/json');
-        if (isset($_SESSION['db_connection'])) {
-            $conn = $_SESSION['db_connection'];
-            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
-                $structure = $dbManager->getTableStructure($_POST['database'], $_POST['table']);
-                echo json_encode($structure);
-            } else {
-                echo json_encode([]);
-            }
-        } else {
-            echo json_encode([]);
-        }
-        exit;
-    }
-}
-?>
