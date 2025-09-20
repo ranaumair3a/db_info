@@ -166,7 +166,7 @@ class DatabaseManager {
         return $columns;
     }
     
-    public function getTableData($database, $table, $limit = 100, $offset = 0, $orderBy = '', $orderDir = 'ASC') {
+    public function getTableData($database, $table, $limit = 25, $offset = 0, $orderBy = '', $orderDir = 'ASC') {
         try {
             $countStmt = $this->connection->query("SELECT COUNT(*) FROM `$database`.`$table`");
             $totalRows = $countStmt->fetchColumn();
