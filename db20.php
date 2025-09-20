@@ -18,7 +18,7 @@ class DatabaseManager {
     public function __construct() {
         $this->config = [
             'title' => 'DataHub Pro',
-            'version' => '2.1.0',
+            'version' => '3.1.0',
             'theme' => 'modern'
         ];
     }
@@ -563,7 +563,7 @@ if (isset($_SESSION['db_connection'])) {
                         $databases = $dbManager->getDatabases();
                         foreach ($databases as $db):
                         ?>
-                            <li onclick="selectDatabase('<?php echo htmlspecialchars($db); ?>')"><?php echo htmlspecialchars($db); ?></li>
+                            <li onclick="selectDatabase('<?php echo htmlspecialchars($db); ?>')" style="cursor: pointer;"><?php echo htmlspecialchars($db); ?></li>
                         <?php endforeach; ?>
                     </ul>
                     
@@ -646,27 +646,52 @@ if (isset($_SESSION['db_connection'])) {
         }
         
         function loadTables(database) {
+            // Show loading state
+            const tablesSection = document.getElementById('tables-section');
+            const tablesList = document.getElementById('tables-list');
+            
+            tablesSection.style.display = 'block';
+            tablesList.innerHTML = '<li>Loading tables...</li>';
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('action', 'get_tables');
+            formData.append('database', database);
+            
             fetch(window.location.href, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'action=get_tables&database=' + encodeURIComponent(database)
+                body: formData
             })
-            .then(response => response.json())
-            .then(tables => {
-                const tablesSection = document.getElementById('tables-section');
-                const tablesList = document.getElementById('tables-list');
-                
-                tablesSection.style.display = 'block';
-                tablesList.innerHTML = '';
-                
-                tables.forEach(table => {
-                    const li = document.createElement('li');
-                    li.textContent = table;
-                    li.onclick = () => loadTableData(database, table);
-                    tablesList.appendChild(li);
-                });
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(text => {
+                try {
+                    const tables = JSON.parse(text);
+                    tablesList.innerHTML = '';
+                    
+                    if (tables.length === 0) {
+                        tablesList.innerHTML = '<li>No tables found</li>';
+                        return;
+                    }
+                    
+                    tables.forEach(table => {
+                        const li = document.createElement('li');
+                        li.textContent = table;
+                        li.onclick = () => loadTableData(database, table);
+                        tablesList.appendChild(li);
+                    });
+                } catch (e) {
+                    tablesList.innerHTML = '<li>Error loading tables</li>';
+                    console.error('JSON parse error:', e, text);
+                }
+            })
+            .catch(error => {
+                tablesList.innerHTML = '<li>Error loading tables</li>';
+                console.error('Fetch error:', error);
             });
         }
         
@@ -675,48 +700,135 @@ if (isset($_SESSION['db_connection'])) {
             const tableContent = document.getElementById('table-content');
             
             tableDataDiv.style.display = 'block';
-            tableContent.innerHTML = '<p>Loading...</p>';
+            tableContent.innerHTML = '<p>Loading table data...</p>';
+            
+            // Highlight selected table
+            document.querySelectorAll('#tables-list li').forEach(li => li.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('action', 'get_table_data');
+            formData.append('database', database);
+            formData.append('table', table);
             
             fetch(window.location.href, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'action=get_table_data&database=' + encodeURIComponent(database) + '&table=' + encodeURIComponent(table)
+                body: formData
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.text();
+            })
+            .then(text => {
+                try {
+                    const result = JSON.parse(text);
+                    
+                    if (result.success) {
+                        let html = `
+                            <div style="margin-bottom: 15px;">
+                                <h4>Table: ${table}</h4>
+                                <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'sql')">Export SQL</button>
+                                <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'csv')">Export CSV</button>
+                                <button class="btn btn-primary" onclick="showTableStructure('${database}', '${table}')">Show Structure</button>
+                            </div>`;
+                        
+                        if (result.data && result.data.length > 0) {
+                            html += `<div class="table-container">
+                                <table>
+                                    <thead>
+                                        <tr>`;
+                            
+                            result.columns.forEach(column => {
+                                html += `<th>${escapeHtml(column)}</th>`;
+                            });
+                            
+                            html += `</tr></thead><tbody>`;
+                            
+                            result.data.forEach(row => {
+                                html += '<tr>';
+                                Object.values(row).forEach(value => {
+                                    html += `<td>${escapeHtml(value || 'NULL')}</td>`;
+                                });
+                                html += '</tr>';
+                            });
+                            
+                            html += `</tbody></table></div>`;
+                            html += `<p><strong>Showing ${result.data.length} of ${result.total} rows</strong></p>`;
+                        } else {
+                            html += '<p>No data found in this table.</p>';
+                        }
+                        
+                        tableContent.innerHTML = html;
+                    } else {
+                        tableContent.innerHTML = `<div class="alert alert-danger">Error: ${escapeHtml(result.error)}</div>`;
+                    }
+                } catch (e) {
+                    tableContent.innerHTML = '<div class="alert alert-danger">Error parsing response</div>';
+                    console.error('JSON parse error:', e, text);
+                }
+            })
+            .catch(error => {
+                tableContent.innerHTML = '<div class="alert alert-danger">Error loading table data</div>';
+                console.error('Fetch error:', error);
+            });
+        }
+        
+        function showTableStructure(database, table) {
+            const tableContent = document.getElementById('table-content');
+            tableContent.innerHTML = '<p>Loading table structure...</p>';
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('action', 'get_table_structure');
+            formData.append('database', database);
+            formData.append('table', table);
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.text())
+            .then(text => {
+                try {
+                    const result = JSON.parse(text);
+                    
                     let html = `
                         <div style="margin-bottom: 15px;">
-                            <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'sql')">Export SQL</button>
-                            <button class="btn btn-secondary" onclick="exportTable('${database}', '${table}', 'csv')">Export CSV</button>
+                            <h4>Structure: ${table}</h4>
+                            <button class="btn btn-primary" onclick="loadTableData('${database}', '${table}')">Show Data</button>
                         </div>
                         <div class="table-container">
                             <table>
                                 <thead>
-                                    <tr>`;
+                                    <tr>
+                                        <th>Field</th>
+                                        <th>Type</th>
+                                        <th>Null</th>
+                                        <th>Key</th>
+                                        <th>Default</th>
+                                        <th>Extra</th>
+                                    </tr>
+                                </thead>
+                                <tbody>`;
                     
-                    result.columns.forEach(column => {
-                        html += `<th>${column}</th>`;
-                    });
-                    
-                    html += `</tr></thead><tbody>`;
-                    
-                    result.data.forEach(row => {
-                        html += '<tr>';
-                        Object.values(row).forEach(value => {
-                            html += `<td>${value || 'NULL'}</td>`;
-                        });
-                        html += '</tr>';
+                    result.forEach(column => {
+                        html += `<tr>
+                            <td><strong>${escapeHtml(column.Field)}</strong></td>
+                            <td>${escapeHtml(column.Type)}</td>
+                            <td>${escapeHtml(column.Null)}</td>
+                            <td>${escapeHtml(column.Key)}</td>
+                            <td>${escapeHtml(column.Default || '')}</td>
+                            <td>${escapeHtml(column.Extra || '')}</td>
+                        </tr>`;
                     });
                     
                     html += `</tbody></table></div>`;
-                    html += `<p>Showing ${result.data.length} of ${result.total} rows</p>`;
-                    
                     tableContent.innerHTML = html;
-                } else {
-                    tableContent.innerHTML = `<div class="alert alert-danger">Error: ${result.error}</div>`;
+                } catch (e) {
+                    tableContent.innerHTML = '<div class="alert alert-danger">Error loading table structure</div>';
                 }
             });
         }
@@ -734,6 +846,27 @@ if (isset($_SESSION['db_connection'])) {
             form.submit();
             document.body.removeChild(form);
         }
+        
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+        
+        // Auto-select first database on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstDb = document.querySelector('.db-list li');
+            if (firstDb) {
+                setTimeout(() => {
+                    firstDb.click();
+                }, 500);
+            }
+        });
     </script>
 </body>
 </html>
@@ -743,17 +876,49 @@ if (isset($_SESSION['db_connection'])) {
 if ($_POST && isset($_POST['action'])) {
     if ($_POST['action'] === 'get_tables') {
         header('Content-Type: application/json');
-        $conn = $_SESSION['db_connection'];
-        $dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port']);
-        echo json_encode($dbManager->getTables($_POST['database']));
+        if (isset($_SESSION['db_connection'])) {
+            $conn = $_SESSION['db_connection'];
+            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
+                $tables = $dbManager->getTables($_POST['database']);
+                echo json_encode($tables);
+            } else {
+                echo json_encode([]);
+            }
+        } else {
+            echo json_encode([]);
+        }
         exit;
     }
     
     if ($_POST['action'] === 'get_table_data') {
         header('Content-Type: application/json');
-        $conn = $_SESSION['db_connection'];
-        $dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port']);
-        echo json_encode($dbManager->getTableData($_POST['database'], $_POST['table']));
+        if (isset($_SESSION['db_connection'])) {
+            $conn = $_SESSION['db_connection'];
+            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
+                $result = $dbManager->getTableData($_POST['database'], $_POST['table']);
+                echo json_encode($result);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Connection failed']);
+            }
+        } else {
+            echo json_encode(['success' => false, 'error' => 'No active connection']);
+        }
+        exit;
+    }
+    
+    if ($_POST['action'] === 'get_table_structure') {
+        header('Content-Type: application/json');
+        if (isset($_SESSION['db_connection'])) {
+            $conn = $_SESSION['db_connection'];
+            if ($dbManager->connect($conn['host'], $conn['username'], $conn['password'], $conn['database'], $conn['port'])) {
+                $structure = $dbManager->getTableStructure($_POST['database'], $_POST['table']);
+                echo json_encode($structure);
+            } else {
+                echo json_encode([]);
+            }
+        } else {
+            echo json_encode([]);
+        }
         exit;
     }
 }
